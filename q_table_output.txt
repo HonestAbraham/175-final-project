@@ -1,0 +1,307 @@
+State: ()
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: -0.04
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 1.85
+  Action: planks               Q-value: 5.04
+
+State: (('red_mushroom', 1),)
+  Action: present_gift         Q-value: 5.00
+  Action: pumpkin              Q-value: 2.16
+  Action: sugar                Q-value: -0.87
+  Action: egg                  Q-value: -4.51
+  Action: planks               Q-value: 2.16
+
+State: (('planks', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: 10.00
+  Action: pumpkin              Q-value: 3.10
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: -6.91
+  Action: planks               Q-value: 1.35
+
+State: (('planks', 1), ('red_mushroom', 1), ('sugar', 1))
+  Action: present_gift         Q-value: 0.00
+
+State: (('sugar', 1),)
+  Action: present_gift         Q-value: -6.57
+  Action: pumpkin              Q-value: 0.00
+  Action: egg                  Q-value: -1.38
+  Action: red_mushroom         Q-value: -0.27
+  Action: planks               Q-value: 0.00
+
+State: (('egg', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -10.50
+  Action: pumpkin              Q-value: 6.48
+  Action: egg                  Q-value: -5.40
+  Action: red_mushroom         Q-value: -2.70
+  Action: planks               Q-value: -10.05
+
+State: (('egg', 1),)
+  Action: present_gift         Q-value: -7.50
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: -2.07
+  Action: red_mushroom         Q-value: -1.80
+  Action: planks               Q-value: -1.21
+
+State: (('egg', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: -10.20
+  Action: pumpkin              Q-value: -9.18
+  Action: sugar                Q-value: -10.70
+  Action: egg                  Q-value: -9.72
+  Action: planks               Q-value: -7.72
+
+State: (('egg', 1), ('planks', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: -14.14
+
+State: (('pumpkin', 1),)
+  Action: present_gift         Q-value: -1.50
+  Action: c_pumpkin_seeds      Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: -0.57
+  Action: planks               Q-value: 0.00
+
+State: (('planks', 1), ('pumpkin', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_pumpkin_seeds      Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+  Action: planks               Q-value: 0.00
+
+State: (('planks', 1), ('pumpkin', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: 4.90
+  Action: c_pumpkin_seeds      Q-value: -3.60
+
+State: (('planks', 1), ('pumpkin_seeds', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: -33.28
+
+State: (('planks', 2), ('red_mushroom', 1))
+  Action: present_gift         Q-value: 9.86
+  Action: c_bowl               Q-value: 0.00
+
+State: (('egg', 1), ('pumpkin', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -12.00
+  Action: c_pumpkin_pie        Q-value: 34.83
+  Action: c_pumpkin_seeds      Q-value: 0.00
+
+State: (('egg', 1), ('pumpkin_seeds', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -25.50
+
+State: (('red_mushroom', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -1.50
+  Action: pumpkin              Q-value: -2.60
+  Action: egg                  Q-value: -10.98
+  Action: planks               Q-value: 0.00
+
+State: (('planks', 1),)
+  Action: present_gift         Q-value: 5.00
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 4.76
+  Action: planks               Q-value: 0.00
+
+State: (('bowl', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_mushroom_stew      Q-value: 0.00
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+
+State: (('bowl', 1), ('egg', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_mushroom_stew      Q-value: 0.00
+
+State: (('egg', 1), ('mushroom_stew', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+
+State: (('egg', 1), ('mushroom_stew', 1), ('sugar', 1))
+  Action: present_gift         Q-value: 19.50
+
+State: (('planks', 2),)
+  Action: present_gift         Q-value: 0.00
+  Action: c_bowl               Q-value: 0.00
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 2.29
+
+State: (('egg', 1), ('planks', 2))
+  Action: present_gift         Q-value: -7.65
+  Action: c_bowl               Q-value: 0.00
+
+State: (('egg', 1), ('planks', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: -2.70
+  Action: egg                  Q-value: -13.09
+  Action: red_mushroom         Q-value: -2.96
+  Action: planks               Q-value: -1.35
+
+State: (('egg', 2), ('planks', 1))
+  Action: present_gift         Q-value: -37.44
+
+State: (('pumpkin', 1), ('sugar', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_pumpkin_seeds      Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+  Action: planks               Q-value: 0.00
+
+State: (('pumpkin_seeds', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -18.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: -8.41
+  Action: planks               Q-value: 0.00
+
+State: (('pumpkin_seeds', 1),)
+  Action: present_gift         Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: -1.49
+  Action: planks               Q-value: 0.00
+
+State: (('pumpkin_seeds', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: -13.50
+  Action: sugar                Q-value: -16.00
+  Action: egg                  Q-value: -18.21
+  Action: planks               Q-value: -12.17
+
+State: (('pumpkin', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_pumpkin_seeds      Q-value: -3.16
+  Action: sugar                Q-value: -1.53
+  Action: egg                  Q-value: -2.25
+  Action: planks               Q-value: 3.80
+
+State: (('pumpkin', 1), ('red_mushroom', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -7.60
+  Action: c_pumpkin_seeds      Q-value: -10.84
+
+State: (('planks', 1), ('pumpkin_seeds', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: sugar                Q-value: -4.95
+  Action: egg                  Q-value: -15.96
+  Action: red_mushroom         Q-value: -9.12
+  Action: planks               Q-value: 0.00
+
+State: (('pumpkin_seeds', 1), ('red_mushroom', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -45.76
+
+State: (('planks', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -1.50
+  Action: pumpkin              Q-value: 0.00
+  Action: egg                  Q-value: -5.91
+  Action: red_mushroom         Q-value: 0.00
+  Action: planks               Q-value: 0.00
+
+State: (('planks', 1), ('pumpkin', 1), ('sugar', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_pumpkin_seeds      Q-value: -8.41
+
+State: (('planks', 1), ('pumpkin_seeds', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -36.13
+
+State: (('egg', 2), ('red_mushroom', 1))
+  Action: present_gift         Q-value: -34.20
+
+State: (('planks', 2), ('pumpkin', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_pumpkin_seeds      Q-value: 0.00
+  Action: c_bowl               Q-value: 0.00
+
+State: (('bowl', 1), ('pumpkin', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_pumpkin_seeds      Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+
+State: (('bowl', 1), ('pumpkin', 1), ('sugar', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_pumpkin_seeds      Q-value: -5.31
+
+State: (('bowl', 1), ('pumpkin_seeds', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -30.09
+
+State: (('egg', 1), ('planks', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -24.96
+
+State: (('egg', 1), ('red_mushroom', 1), ('sugar', 1))
+  Action: present_gift         Q-value: -26.47
+
+State: (('egg', 1), ('planks', 1), ('pumpkin', 1))
+  Action: present_gift         Q-value: -7.50
+  Action: c_pumpkin_seeds      Q-value: -21.29
+
+State: (('egg', 1), ('planks', 1), ('pumpkin_seeds', 1))
+  Action: present_gift         Q-value: -58.24
+
+State: (('planks', 2), ('sugar', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: c_bowl               Q-value: 0.00
+
+State: (('bowl', 1), ('sugar', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: pumpkin              Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+
+State: (('egg', 1), ('pumpkin', 1))
+  Action: present_gift         Q-value: -9.00
+  Action: c_pumpkin_seeds      Q-value: 0.00
+  Action: sugar                Q-value: 2.70
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+  Action: planks               Q-value: -3.21
+
+State: (('egg', 1), ('pumpkin', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: -19.00
+  Action: c_pumpkin_seeds      Q-value: -23.45
+
+State: (('egg', 1), ('pumpkin_seeds', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: -58.24
+
+State: (('egg', 2), ('sugar', 1))
+  Action: present_gift         Q-value: -30.60
+
+State: (('egg', 1), ('pumpkin_seeds', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+  Action: planks               Q-value: -6.30
+
+State: (('pumpkin_pie', 1),)
+  Action: present_gift         Q-value: 75.99
+  Action: egg                  Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+  Action: planks               Q-value: 0.00
+
+State: (('egg', 1), ('pumpkin_pie', 1))
+  Action: present_gift         Q-value: 0.00
+  Action: red_mushroom         Q-value: 0.00
+  Action: planks               Q-value: 0.00
+
+State: (('egg', 1), ('pumpkin_pie', 1), ('red_mushroom', 1))
+  Action: present_gift         Q-value: 24.00
+
+State: (('egg', 2),)
+  Action: present_gift         Q-value: -15.00
+  Action: pumpkin              Q-value: 0.00
+  Action: sugar                Q-value: 0.00
+  Action: red_mushroom         Q-value: -8.87
+  Action: planks               Q-value: -13.69
+
+State: (('egg', 2), ('pumpkin', 1))
+  Action: present_gift         Q-value: -16.50
+  Action: c_pumpkin_seeds      Q-value: 0.00
+
+State: (('egg', 2), ('pumpkin_seeds', 1))
+  Action: present_gift         Q-value: -30.00
+
