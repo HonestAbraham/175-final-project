@@ -83,6 +83,8 @@ def GetMissionXML(summary):
                     <DrawCuboid x1="-3" y1="226" z1="-3" x2="3" y2="226" z2="3" type="dirt" />
                     <DrawBlock x="-0" y="226" z="0" type="diamond_block"/>
                     ''' + getItemDrawing(positions) + '''
+                    <DrawBlock x="5" y="227" z="5" type="crafting_table"/>
+                    <DrawBlock x="-2" y="227" z="-5" type="furnace"/>
                 </DrawingDecorator>
                 <ServerQuitWhenAnyAgentFinishes />
             </ServerHandlers>
@@ -93,10 +95,6 @@ def GetMissionXML(summary):
             <AgentStart>
                 <Placement x="0.5" y="227.0" z="0.5"/>
                 <Inventory>
-                    <InventoryItem slot="9" type="planks" variant="acacia"/>
-                    <InventoryItem slot="10" type="brown_mushroom"/>
-                    <InventoryItem slot="11" type="planks" variant="spruce"/>
-                    <InventoryItem slot="12" type="brown_mushroom"/>
                 </Inventory>
             </AgentStart>
             <AgentHandlers>
@@ -159,26 +157,6 @@ class Odie(object):
 
         return craft_opt
     
-    # def get_cooking_options(self):
-    #     """Returns the objects that can be cooked from the inventory."""
-    #     import copy
-    #     cooking_opt = []
-    #     inventory_items = []
-    #     for item, count in self.inventory.items():
-    #         for j in range(count):
-    #             inventory_items.append(item)
-
-    #     for item, recipe in cooking_recipe.items():
-    #         t_inventory_items = copy.deepcopy(inventory_items)
-    #         inter = []
-    #         for i in recipe:
-    #             if i in t_inventory_items:
-    #                 inter.append(i)
-    #                 t_inventory_items.remove(i)
-    #         if len(inter) == len(recipe):
-    #             cooking_opt.append(item)
-
-    #     return cooking_opt
 
     @staticmethod
     def get_obj_locations(agent_host):
@@ -223,7 +201,7 @@ class Odie(object):
 
     def teleport(self, agent_host, teleport_x, teleport_z):
         """Directly teleport to a specific position."""
-        tp_command = "tp " + str(teleport_x)+ " 226 " + str(teleport_z)
+        tp_command = "tp " + str(teleport_x)+ " 227 " + str(teleport_z)
         agent_host.sendCommand(tp_command)
         good_frame = False
         start = timer()
@@ -239,6 +217,46 @@ class Odie(object):
                     good_frame = True
                     end_frame = timer()
 
+    def move_to(self, agent_host, target_x, target_z):
+        obj_locs = self.get_obj_locations(agent_host)
+        _, curr_x, curr_z = obj_locs['Odie']
+
+        dx = target_x - curr_x
+        dz = target_z - curr_z
+        angle_to_target = math.degrees(math.atan2(-dx, dz)) % 360
+
+        # Face the target
+        agent_host.sendCommand(f"setYaw {angle_to_target}")
+        time.sleep(0.2)
+
+        # Start sprinting and moving
+        agent_host.sendCommand("sprint 1")
+        agent_host.sendCommand("move 1")
+
+        while True:
+            # print("test")
+            time.sleep(0.1)
+            obj_locs = self.get_obj_locations(agent_host)
+            _, curr_x, curr_z = obj_locs['Odie']
+            dx = target_x - curr_x
+            dz = target_z - curr_z
+            distance = math.sqrt(dx**2 + dz**2)
+
+            if distance <= 0.5:
+                print(f"Hunger: {self.get_hunger_level(agent_host)}")
+                break
+
+
+        agent_host.sendCommand("move 0")
+        agent_host.sendCommand("sprint 0")
+
+    def get_hunger_level(self, agent_host):
+        world_state = agent_host.getWorldState()
+        if world_state.number_of_observations_since_last_state > 0:
+            obs = json.loads(world_state.observations[-1].text)
+            return obs.get("Food", 20)
+
+
 
     def fetch_item(self, agent_host, item_to_pick):
         """Finds the object in the world and picks it up (by teleporting to it).
@@ -252,6 +270,7 @@ class Odie(object):
         my_yaw, my_x, my_z = obj_locs['Odie']
         obj_yaw, obj_x, obj_z = obj_locs[item_to_pick]
         self.teleport(agent_host, obj_x, obj_z)
+        # self.move_to(agent_host, obj_x, obj_z)
         time.sleep(0.1)  # Letting the host pick up on the things that were picked up
         while True:
             if self.was_item_picked(agent_host, item_to_pick) or item_to_pick not in obj_locs:

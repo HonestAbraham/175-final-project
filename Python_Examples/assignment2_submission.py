@@ -39,7 +39,7 @@ rewards_map = {
 
 
 def is_solution(reward):
-    return reward == 6
+    return reward == 11
 
 def get_curr_state(items):
     filtered = [(k, v) for k, v in items if v > 0]

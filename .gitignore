@@ -16,15 +16,15 @@ Python_Examples/Given Examples/
 *.exe
 
 # === Minecraft ===
-Minecraft/.gradle/
-Minecraft/build/
-Minecraft/run/logs/
+Minecraft/.gradle/*
+Minecraft/build/*
+Minecraft/run/logs/*
 Minecraft/run/usercache.json
-Minecraft/run/config/
-Minecraft/run/saves/
-Minecraft/run/crash-reports/
+Minecraft/run/config/*
+Minecraft/run/saves/*
+Minecraft/run/crash-reports/*
 Minecraft/run/*.lck
-Minecraft/
+Minecraft/*
 *.jar
 
 # === VS Code / Editors ===

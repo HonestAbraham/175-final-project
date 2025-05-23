@@ -39,3 +39,13 @@ Raw Ingredients / Raw Food:
 - Cookie (minecraft:cookie)
 - Glistering Melon Slice (minecraft:speckled_melon)
 - Spider Eye (minecraft:spider_eye)
+
+TODO:
+- agent freezes (not sure what to do about that)
+- agent can only walk instead of run
+- increase scope of food
+    - update food recipes and cook recipes
+- use furnace to cook and crafting table to craft
+- make it walk from one ingredient to another rather than teleport back to the middle
+    - try to avoid extra ingredients or drop them
+- 
