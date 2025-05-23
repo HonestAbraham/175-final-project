@@ -13,8 +13,6 @@ random_state.pkl
 
 # === Malmo Mission Files ===
 Python_Examples/Given Examples/
-*.pyd
-*.lib
 *.exe
 
 # === Minecraft ===
@@ -26,6 +24,7 @@ Minecraft/run/config/
 Minecraft/run/saves/
 Minecraft/run/crash-reports/
 Minecraft/run/*.lck
+Minecraft/
 *.jar
 
 # === VS Code / Editors ===
