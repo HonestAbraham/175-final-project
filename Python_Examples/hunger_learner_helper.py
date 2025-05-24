@@ -38,9 +38,6 @@ rewards_map = {
 }
 
 
-def is_solution(reward):
-    return reward == 11
-
 def get_curr_state(items):
     filtered = [(k, v) for k, v in items if v > 0]
     return tuple(sorted(filtered))
@@ -73,3 +70,6 @@ def save_q_table_to_file(q_table, filename="q_table_output.txt"):
             for action, value in actions.items():
                 f.write(f"  Action: {action.ljust(20)} Q-value: {value:.2f}\n")
             f.write("\n")
+
+def is_solution(reward):
+    return reward == 11

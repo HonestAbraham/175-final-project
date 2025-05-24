@@ -48,4 +48,6 @@ TODO:
 - use furnace to cook and crafting table to craft
 - make it walk from one ingredient to another rather than teleport back to the middle
     - try to avoid extra ingredients or drop them
-- 
+    - pathfind
+- Dynamically find the food items along with furnace and crafting table
+

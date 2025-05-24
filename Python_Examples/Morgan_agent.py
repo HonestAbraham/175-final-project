@@ -1,8 +1,3 @@
-"""
-Odie is trying to get the best present. Help him to learn what he should do.
-
-Author: Moshe Lichman and Sameer Singh
-"""
 from __future__ import division
 import numpy as np
 
@@ -15,7 +10,7 @@ import json
 import random
 import math
 import errno
-import assignment2_submission as submission
+import hunger_learner_helper as submission
 from collections import defaultdict, deque
 from timeit import default_timer as timer
 
@@ -25,98 +20,7 @@ food_recipes = submission.food_recipes
 rewards_map = submission.rewards_map
 cooking_recipe = submission.cooking_recipes
 
-def buildPositionList(items):
-    """Places the items in a circle."""
-    positions = []
-    angle = 2*math.pi/len(items)
-    for i in range(len(items)):
-        item = items[i]
-        x = int(6*math.sin(i*angle))
-        y = int(6*math.cos(i*angle))
-        positions.append((x, y))
-    return positions
-
-
-def getItemDrawing(positions):
-    """Create the XML for the items."""
-    drawing = ""
-    index = 0
-    for p in positions:
-        item = items[index].split()
-        drawing += '<DrawItem x="' + str(p[0]) + '" y="228" z="' + str(p[1]) + '" type="' + item[0]
-        if len(item) > 1:
-            drawing += '" variant="' + item[1]
-        drawing += '" />'
-        index += 1
-    return drawing
-
-
-def GetMissionXML(summary):
-    ''' Build an XML mission string that uses the RewardForCollectingItem mission handler.'''
-
-    positions = buildPositionList(items)
-
-    return '''<?xml version="1.0" encoding="UTF-8" ?>
-    <Mission xmlns="http://ProjectMalmo.microsoft.com" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-        <About>
-            <Summary>''' + summary + '''</Summary>
-        </About>
-
-        <ModSettings>
-            <MsPerTick>100</MsPerTick>
-        </ModSettings>
-
-        <ServerSection>
-            <ServerInitialConditions>
-                <Time>
-                    <StartTime>6000</StartTime>
-                    <AllowPassageOfTime>false</AllowPassageOfTime>
-                </Time>
-                <Weather>clear</Weather>
-                <AllowSpawning>false</AllowSpawning>
-            </ServerInitialConditions>
-            <ServerHandlers>
-                <FlatWorldGenerator generatorString="3;7,220*1,5*3,2;3;,biome_1" />
-                <DrawingDecorator>
-                    <DrawCuboid x1="-50" y1="226" z1="-50" x2="50" y2="228" z2="50" type="air" />
-                    <DrawCuboid x1="-50" y1="226" z1="-50" x2="50" y2="226" z2="50" type="monster_egg" variant="chiseled_brick" />
-                    <DrawCuboid x1="-3" y1="226" z1="-3" x2="3" y2="226" z2="3" type="dirt" />
-                    <DrawBlock x="-0" y="226" z="0" type="diamond_block"/>
-                    ''' + getItemDrawing(positions) + '''
-                    <DrawBlock x="5" y="227" z="5" type="crafting_table"/>
-                    <DrawBlock x="-2" y="227" z="-5" type="furnace"/>
-                </DrawingDecorator>
-                <ServerQuitWhenAnyAgentFinishes />
-            </ServerHandlers>
-        </ServerSection>
-
-        <AgentSection mode="Survival">
-            <Name>Odie</Name>
-            <AgentStart>
-                <Placement x="0.5" y="227.0" z="0.5"/>
-                <Inventory>
-                </Inventory>
-            </AgentStart>
-            <AgentHandlers>
-                <ContinuousMovementCommands turnSpeedDegs="480"/>
-                <AbsoluteMovementCommands/>
-                <SimpleCraftCommands/>
-                <MissionQuitCommands/>
-                <InventoryCommands/>
-                <ObservationFromNearbyEntities>
-                    <Range name="entities" xrange="40" yrange="40" zrange="40"/>
-                </ObservationFromNearbyEntities>
-                <ObservationFromFullInventory/>
-                <AgentQuitFromCollectingItem>
-                    <Item type="rabbit_stew" description="Supper's Up!!"/>
-                </AgentQuitFromCollectingItem>
-            </AgentHandlers>
-        </AgentSection>
-
-    </Mission>'''
-
-
-class Odie(object):
+class Morgan(object):
     def __init__(self, alpha=0.3, gamma=1, n=1):
         """Constructing an RL agent.
 
@@ -162,7 +66,7 @@ class Odie(object):
     def get_obj_locations(agent_host):
         """Queries for the object's location in the world.
 
-        As a side effect it also returns Odie's location.
+        As a side effect it also returns morgan's location.
         """
         nearyby_obs = {}
         while True:
@@ -172,7 +76,7 @@ class Odie(object):
                 ob = json.loads(msg)
                 for ent in  ob['entities']:
                     name = ent['name']
-                    # if name != 'Odie':
+                    # if name != 'morgan':
                     nearyby_obs[name] = (ent['yaw'], ent['x'], ent['z'])
 
                 return nearyby_obs
@@ -219,7 +123,7 @@ class Odie(object):
 
     def move_to(self, agent_host, target_x, target_z):
         obj_locs = self.get_obj_locations(agent_host)
-        _, curr_x, curr_z = obj_locs['Odie']
+        _, curr_x, curr_z = obj_locs['morgan']
 
         dx = target_x - curr_x
         dz = target_z - curr_z
@@ -237,7 +141,7 @@ class Odie(object):
             # print("test")
             time.sleep(0.1)
             obj_locs = self.get_obj_locations(agent_host)
-            _, curr_x, curr_z = obj_locs['Odie']
+            _, curr_x, curr_z = obj_locs['morgan']
             dx = target_x - curr_x
             dz = target_z - curr_z
             distance = math.sqrt(dx**2 + dz**2)
@@ -256,18 +160,26 @@ class Odie(object):
             obs = json.loads(world_state.observations[-1].text)
             return obs.get("Food", 20)
 
+    def is_near_block(self, agent_host, block_type, threshold=1.5):
+        obj_locs = self.get_obj_locations(agent_host)
+        _, agent_x, agent_z = obj_locs['morgan']
+        for name, (yaw, x, z) in obj_locs.items():
+            if name == block_type:
+                dist = math.sqrt((x - agent_x)**2 + (z - agent_z)**2)
+                return dist <= threshold
+        return False
 
 
     def fetch_item(self, agent_host, item_to_pick):
         """Finds the object in the world and picks it up (by teleporting to it).
 
-        Will not pick up the item if Odie has more than 3 items in his mouth :)
+        Will not pick up the item if morgan has more than 3 items in his mouth :)
         """
         if self.num_items_in_inv > inventory_limit:
             return
         # teleport
         obj_locs = self.get_obj_locations(agent_host)
-        my_yaw, my_x, my_z = obj_locs['Odie']
+        my_yaw, my_x, my_z = obj_locs['morgan']
         obj_yaw, obj_x, obj_z = obj_locs[item_to_pick]
         self.teleport(agent_host, obj_x, obj_z)
         # self.move_to(agent_host, obj_x, obj_z)
@@ -290,6 +202,11 @@ class Odie(object):
 
         It replaces the item in the inventory dictionary.
         """
+
+        if not self.is_near_block(agent_host, "crafting_table"):
+            print("Not near crafting table!")
+            return
+        
         items_needed = food_recipes[item]
         for item_needed in items_needed:
             self.inventory[item_needed] -= 1
@@ -303,6 +220,10 @@ class Odie(object):
         time.sleep(0.25)
 
     def cook_item(self, agent_host, cooked_item):
+        if not self.is_near_block(agent_host, "furnace"):
+            print("Not near furnace!")
+            return
+        
         ingredients = cooking_recipe[cooked_item]
         for item in ingredients:
             self.inventory[item] -= 1
@@ -341,7 +262,7 @@ class Odie(object):
         """Returns all possible actions that can be done at the current state. """
         action_list = []
         if not is_first_action:
-            # Not allowing Odie to come back empty.
+            # Not allowing morgan to come back empty.
             action_list = ['present_gift']
 
         craft_opt = self.get_crafting_options()
@@ -351,7 +272,7 @@ class Odie(object):
         if self.num_items_in_inv < inventory_limit:
             nearby_obj = self.get_obj_locations(agent_host)
             if len(nearby_obj) > 1:
-                action_list.extend([item for item in nearby_obj.keys() if item != 'Odie'])
+                action_list.extend([item for item in nearby_obj.keys() if item != 'morgan'])
 
         for cooked_item, ingredients in cooking_recipe.items():
             if all(self.inventory[i] >= ingredients.count(i) for i in ingredients):
@@ -377,17 +298,71 @@ class Odie(object):
 
         return submission.choose_action(curr_state, possible_actions, eps, self.q_table)
 
+    @staticmethod
+    def get_obj_locations(agent_host):
+        nearyby_obs = {}
+        while True:
+            world_state = agent_host.getWorldState()
+            if world_state.number_of_observations_since_last_state > 0:
+                msg = world_state.observations[-1].text
+                ob = json.loads(msg)
+                for ent in ob['entities']:
+                    name = ent['name']
+                    nearyby_obs[name] = (ent['yaw'], ent['x'], ent['z'])
+                return nearyby_obs
+
+    def find_block_position(self, agent_host, block_type, max_wait_seconds=5):
+        start_time = time.time()
+        while time.time() - start_time < max_wait_seconds:
+            world_state = agent_host.getWorldState()
+            if world_state.number_of_observations_since_last_state > 0:
+                try:
+                    print(world_state.observations[-1])
+                    obs = json.loads(world_state.observations[-1].text)
+                    if 'floor_all' in obs:
+                        grid = obs['floor_all']
+                        
+                        obj_locs = self.get_obj_locations(agent_host)
+                        _, x_pos, z_pos = obj_locs['morgan']
+
+                        x_len = 81  # -40 to 40
+                        y_len = 2   # 227 to 228
+                        z_len = 81
+
+                        for idx, block in enumerate(grid):
+                            if block in [block_type, f"lit_{block_type}"]:
+                                x_idx = idx % x_len
+                                y_idx = (idx // x_len) % y_len
+                                z_idx = idx // (x_len * y_len)
+
+                                dx = x_idx - 40
+                                dz = z_idx - 40
+
+                                return x_pos + dx, z_pos + dz
+                except Exception as e:
+                    print("Error parsing observation:", e)
+            time.sleep(0.1)
+
+        print(f"[WARN] Could not find block type '{block_type}' within {max_wait_seconds}s")
+        return None, None
+
+
     def act(self, agent_host, action):
-        print(action + ",", end = " ")
+        print(action + ",", end=" ")
         if action == 'present_gift':
             return self.present_gift(agent_host)
         elif action.startswith('c_'):
+            # x, z = self.find_block_position(agent_host, "crafting_table")
+            # if x is not None:
+            #     self.move_to(agent_host, x, z)
             self.craft_item(agent_host, action[2:])
         elif action.startswith('cook_'):
+            # x, z = self.find_block_position(agent_host, "furnace")
+            # if x is not None:
+            #     self.move_to(agent_host, x, z)
             self.cook_item(agent_host, action[len('cook_'):])
         else:
             self.fetch_item(agent_host, action)
-
         return 0
 
     def update_q_table(self, tau, S, A, R, T):
@@ -469,67 +444,3 @@ class Odie(object):
                         self.update_q_table(tau, S, A, R, T)
                     done_update = True
                     break
-
-if __name__ == '__main__':
-    random.seed(0)
-    #sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', 0)  # flush print output immediately
-    print('Starting...', flush=True)
-
-    expected_reward = 3390
-    my_client_pool = MalmoPython.ClientPool()
-    my_client_pool.add(MalmoPython.ClientInfo("127.0.0.1", 10000))
-
-    agent_host = MalmoPython.AgentHost()
-    try:
-        agent_host.parse(sys.argv)
-    except RuntimeError as e:
-        print('ERROR:', e)
-        print(agent_host.getUsage())
-        exit(1)
-    if agent_host.receivedArgument("help"):
-        print(agent_host.getUsage())
-        exit(0)
-
-    num_reps = 30000
-    n=1
-    odie = Odie(n=n)
-    print("n=",n)
-    odie.clear_inventory()
-    for iRepeat in range(num_reps):
-        my_mission = MalmoPython.MissionSpec(GetMissionXML("Fetch boy #" + str(iRepeat)), True)
-        my_mission_record = MalmoPython.MissionRecordSpec()  # Records nothing by default
-        my_mission.requestVideo(800, 500)
-        my_mission.setViewpoint(1)
-        max_retries = 3
-        for retry in range(max_retries):
-            try:
-                # Attempt to start the mission:
-                agent_host.startMission(my_mission, my_client_pool, my_mission_record, 0, "Odie")
-                break
-            except RuntimeError as e:
-                if retry == max_retries - 1:
-                    print("Error starting mission", e)
-                    print("Is the game running?")
-                    exit(1)
-                else:
-                    time.sleep(2)
-
-        world_state = agent_host.getWorldState()
-        while not world_state.has_mission_begun:
-            time.sleep(0.1)
-            world_state = agent_host.getWorldState()
-
-        # Every few iteration Odie will show us the best policy that he learned.
-        if (iRepeat + 1) % 5 == 0:
-            print((iRepeat+1), 'Showing best policy:', end = " ")
-            found_solution = odie.best_policy(agent_host)
-            if found_solution:
-                print('Found solution')
-                print('Done')
-                break
-        else:
-            print((iRepeat+1), 'Learning Q-Table:', end = " ")
-            odie.run(agent_host)
-
-        odie.clear_inventory()
-        time.sleep(1)
