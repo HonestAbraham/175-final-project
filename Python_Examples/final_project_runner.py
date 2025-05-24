@@ -70,7 +70,7 @@ def GetMissionXML(summary):
                     <DrawBlock x="-0" y="226" z="0" type="diamond_block"/>
                     ''' + getItemDrawing(positions) + '''
                     <DrawBlock x="5" y="227" z="5" type="crafting_table"/>
-                    <DrawBlock x="-2" y="227" z="-2" type="furnace"/>
+                    <DrawBlock x="-5" y="227" z="-5" type="furnace"/>
                 </DrawingDecorator>
                 <ServerQuitWhenAnyAgentFinishes />
             </ServerHandlers>
@@ -86,6 +86,7 @@ def GetMissionXML(summary):
             <AgentHandlers>
                 <ContinuousMovementCommands turnSpeedDegs="480"/>
                 <AbsoluteMovementCommands/>
+                <ObservationFromFullStats/>
                 <SimpleCraftCommands/>
                 <MissionQuitCommands/>
                 <InventoryCommands/>
@@ -94,8 +95,8 @@ def GetMissionXML(summary):
                 </ObservationFromNearbyEntities>
                 <ObservationFromGrid>
                     <Grid name="floor_all">
-                        <min x="-5" y="226" z="-5"/>
-                        <max x="5" y="229" z="5"/>
+                        <min x="-10" y="0" z="-10"/>
+                        <max x="10" y="0" z="10"/>
                     </Grid>
                 </ObservationFromGrid>
                 <ObservationFromFullInventory/>
@@ -134,7 +135,7 @@ if __name__ == '__main__':
     print("n=",n)
     morgan.clear_inventory()
     for iRepeat in range(num_reps):
-        my_mission = MalmoPython.MissionSpec(GetMissionXML("Fetch boy #" + str(iRepeat)), True)
+        my_mission = MalmoPython.MissionSpec(GetMissionXML("Food Search #" + str(iRepeat)), True)
         my_mission_record = MalmoPython.MissionRecordSpec()  # Records nothing by default
         my_mission.requestVideo(800, 500)
         my_mission.setViewpoint(1)

@@ -43,11 +43,13 @@ Raw Ingredients / Raw Food:
 TODO:
 - agent freezes (not sure what to do about that)
 - agent can only walk instead of run
-- increase scope of food
+- increase scope of food (last)
     - update food recipes and cook recipes
-- use furnace to cook and crafting table to craft
+a. use furnace to cook and crafting table to craft 
+    - navigate to furnace & crafting table dynamically
 - make it walk from one ingredient to another rather than teleport back to the middle
     - try to avoid extra ingredients or drop them
     - pathfind
-- Dynamically find the food items along with furnace and crafting table
+- maybe craft the crafting table and furnace?
+- instead of using predetermined rewards map, use the hunger gained as reward.
 

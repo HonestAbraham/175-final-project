@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from timeit import default_timer as timer
 
 items=submission.items
-inventory_limit = 3
+inventory_limit = 5
 food_recipes = submission.food_recipes
 rewards_map = submission.rewards_map
 cooking_recipe = submission.cooking_recipes
@@ -71,9 +71,11 @@ class Morgan(object):
         nearyby_obs = {}
         while True:
             world_state = agent_host.getWorldState()
+            # print(f"world_state: {world_state}")
             if world_state.number_of_observations_since_last_state > 0:
                 msg = world_state.observations[-1].text
                 ob = json.loads(msg)
+                # print(f"ob: {ob}")
                 for ent in  ob['entities']:
                     name = ent['name']
                     # if name != 'morgan':
@@ -122,59 +124,42 @@ class Morgan(object):
                     end_frame = timer()
 
     def move_to(self, agent_host, target_x, target_z):
-        obj_locs = self.get_obj_locations(agent_host)
-        _, curr_x, curr_z = obj_locs['morgan']
-
-        dx = target_x - curr_x
-        dz = target_z - curr_z
-        angle_to_target = math.degrees(math.atan2(-dx, dz)) % 360
-
-        # Face the target
-        agent_host.sendCommand(f"setYaw {angle_to_target}")
-        time.sleep(0.2)
-
-        # Start sprinting and moving
-        agent_host.sendCommand("sprint 1")
-        agent_host.sendCommand("move 1")
+        stuck_counter = 0
+        prev_distance = float('inf')
 
         while True:
-            # print("test")
-            time.sleep(0.1)
             obj_locs = self.get_obj_locations(agent_host)
             _, curr_x, curr_z = obj_locs['morgan']
             dx = target_x - curr_x
             dz = target_z - curr_z
             distance = math.sqrt(dx**2 + dz**2)
 
+            angle_to_target = math.degrees(math.atan2(-dx, dz)) % 360
+            agent_host.sendCommand(f"setYaw {angle_to_target}")
+            time.sleep(0.1)
+            agent_host.sendCommand("sprint 1")
+            agent_host.sendCommand("move 1")
+
             if distance <= 0.5:
-                print(f"Hunger: {self.get_hunger_level(agent_host)}")
                 break
 
+            if abs(distance - prev_distance) < 0.001:
+                stuck_counter += 1
+            else:
+                stuck_counter = 0
+
+            if stuck_counter > 10:
+                print("[WARN] Agent seems stuck. Forcing move stop.")
+                break
+
+            prev_distance = distance
+            time.sleep(0.2)
 
         agent_host.sendCommand("move 0")
         agent_host.sendCommand("sprint 0")
 
-    def get_hunger_level(self, agent_host):
-        world_state = agent_host.getWorldState()
-        if world_state.number_of_observations_since_last_state > 0:
-            obs = json.loads(world_state.observations[-1].text)
-            return obs.get("Food", 20)
 
-    def is_near_block(self, agent_host, block_type, threshold=1.5):
-        obj_locs = self.get_obj_locations(agent_host)
-        _, agent_x, agent_z = obj_locs['morgan']
-        for name, (yaw, x, z) in obj_locs.items():
-            if name == block_type:
-                dist = math.sqrt((x - agent_x)**2 + (z - agent_z)**2)
-                return dist <= threshold
-        return False
-
-
-    def fetch_item(self, agent_host, item_to_pick):
-        """Finds the object in the world and picks it up (by teleporting to it).
-
-        Will not pick up the item if morgan has more than 3 items in his mouth :)
-        """
+    def fetch_item(self, agent_host, item_to_pick):  
         if self.num_items_in_inv > inventory_limit:
             return
         # teleport
@@ -182,13 +167,13 @@ class Morgan(object):
         my_yaw, my_x, my_z = obj_locs['morgan']
         obj_yaw, obj_x, obj_z = obj_locs[item_to_pick]
         self.teleport(agent_host, obj_x, obj_z)
-        # self.move_to(agent_host, obj_x, obj_z)
-        time.sleep(0.1)  # Letting the host pick up on the things that were picked up
+        # self.move_to(agent_host, obj_x, obj_z) TODO: a
+        time.sleep(0.1)  
         while True:
             if self.was_item_picked(agent_host, item_to_pick) or item_to_pick not in obj_locs:
                 break
         self.teleport(agent_host, 0.5, 0.5)
-        time.sleep(0.1)  # Letting the host pick up on the things that were picked up
+        time.sleep(0.1)  
 
         self.inventory[item_to_pick] += 1
         self.num_items_in_inv += 1
@@ -203,10 +188,11 @@ class Morgan(object):
         It replaces the item in the inventory dictionary.
         """
 
-        if not self.is_near_block(agent_host, "crafting_table"):
-            print("Not near crafting table!")
-            return
-        
+        # if not self.is_near_block(agent_host, "crafting_table"):
+        #     print("Not near crafting table!")
+        #     return
+        #TODO: a
+
         items_needed = food_recipes[item]
         for item_needed in items_needed:
             self.inventory[item_needed] -= 1
@@ -219,20 +205,72 @@ class Morgan(object):
         self.num_items_in_inv += 1
         time.sleep(0.25)
 
+    def get_block_position(self, agent_host, block_type, grid_name="floor_all", x_range=21, y_range=1, z_range=21, grid_min_x=-10, grid_min_z=-10, max_wait_seconds=5):
+        start_time = time.time()
+        while time.time() - start_time < max_wait_seconds:
+            world_state = agent_host.getWorldState()
+            if world_state.number_of_observations_since_last_state > 0:
+                try:
+                    obs = json.loads(world_state.observations[-1].text)
+                    if grid_name in obs:
+                        grid = obs[grid_name]
+                        for idx, block in enumerate(grid):
+                            if block == block_type or block == f"lit_{block_type}":
+                                
+                                x_idx = idx % x_range
+                                z_idx = idx // z_range 
+                                
+                                world_x = grid_min_x + x_idx
+                                world_z = grid_min_z + z_idx
+                                return world_x, world_z
+                except Exception as e:
+                    print("Error while parsing observation:", e)
+            time.sleep(0.1)
+
+        print(f"[WARN] Could not find block '{block_type}' in grid '{grid_name}' within {max_wait_seconds} seconds")
+        return None, None
+
+    def can_cook(self, agent_host, threshold=1.5):
+        furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
+        if furnace_x is None:
+            return False
+
+        obj_locs = self.get_obj_locations(agent_host)
+        if 'morgan' not in obj_locs:
+            print("morgan false location")
+            return False
+
+        _, agent_x, agent_z = obj_locs['morgan']
+        distance = math.sqrt((furnace_x)**2 + (furnace_z)**2)
+        print(f"Distance furnace from agent: {distance}")
+        return distance <= threshold
+
     def cook_item(self, agent_host, cooked_item):
-        if not self.is_near_block(agent_host, "furnace"):
-            print("Not near furnace!")
+        if not self.can_cook(agent_host):
+            print("[INFO] Not close enough to a furnace. Moving...")
+            furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
+            print(f"furnace: {furnace_x}, {furnace_z}")
+            if furnace_x is not None:
+                self.move_to(agent_host, furnace_x, furnace_z)
+
+        if cooked_item not in submission.cooking_recipes:
+            print(f"[ERROR] No recipe for {cooked_item}.")
             return
-        
-        ingredients = cooking_recipe[cooked_item]
+
+        ingredients = submission.cooking_recipes[cooked_item]
+        for item in ingredients:
+            if self.inventory[item] < ingredients.count(item):
+                print(f"[ERROR] Not enough {item} to cook {cooked_item}.")
+                return
+
         for item in ingredients:
             self.inventory[item] -= 1
             self.num_items_in_inv -= 1
 
         self.inventory[cooked_item] += 1
         self.num_items_in_inv += 1
-        time.sleep(0.5)  # Optional: simulate cooking time
-
+        print(f"[SUCCESS] Cooked {cooked_item}.")
+        time.sleep(0.5)
 
     def present_gift(self, agent_host):
         """Calculates the reward points for the current inventory.
@@ -298,18 +336,6 @@ class Morgan(object):
 
         return submission.choose_action(curr_state, possible_actions, eps, self.q_table)
 
-    @staticmethod
-    def get_obj_locations(agent_host):
-        nearyby_obs = {}
-        while True:
-            world_state = agent_host.getWorldState()
-            if world_state.number_of_observations_since_last_state > 0:
-                msg = world_state.observations[-1].text
-                ob = json.loads(msg)
-                for ent in ob['entities']:
-                    name = ent['name']
-                    nearyby_obs[name] = (ent['yaw'], ent['x'], ent['z'])
-                return nearyby_obs
 
     def find_block_position(self, agent_host, block_type, max_wait_seconds=5):
         start_time = time.time()
@@ -355,11 +381,15 @@ class Morgan(object):
             # x, z = self.find_block_position(agent_host, "crafting_table")
             # if x is not None:
             #     self.move_to(agent_host, x, z)
+
+            self.move_to(agent_host, 5, 5) #TODO: a.
             self.craft_item(agent_host, action[2:])
         elif action.startswith('cook_'):
             # x, z = self.find_block_position(agent_host, "furnace")
             # if x is not None:
             #     self.move_to(agent_host, x, z)
+
+            self.move_to(agent_host, -5, -5) #TODO: a.
             self.cook_item(agent_host, action[len('cook_'):])
         else:
             self.fetch_item(agent_host, action)
