@@ -52,4 +52,9 @@ a. use furnace to cook and crafting table to craft
     - pathfind
 - maybe craft the crafting table and furnace?
 - instead of using predetermined rewards map, use the hunger gained as reward.
+    - max reward/goal reward is incorrect. we need it to only be able to consume one food at a time.
+    - only be able to consume when hunger is not max
+        - even when hunger is not max, sometimes hunger gained isnt always what u get, it might be capped at 10.
+            - for example: current hunger is 8, eating a steak will result in 10 hunger, giving a reward of 2. But reward should actually be 8
+
 

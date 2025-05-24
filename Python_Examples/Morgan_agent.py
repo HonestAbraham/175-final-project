@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from timeit import default_timer as timer
 
 items=submission.items
-inventory_limit = 5
+inventory_limit = 3
 food_recipes = submission.food_recipes
 rewards_map = submission.rewards_map
 cooking_recipe = submission.cooking_recipes
@@ -41,7 +41,6 @@ class Morgan(object):
         self.num_items_in_inv = 0
 
     def get_crafting_options(self):
-        """Returns the objects that can be crafted from the inventory. """
         import copy
         craft_opt = []
         inventory_items = []
@@ -59,6 +58,7 @@ class Morgan(object):
             if len(inter) == len(recipe):
                 craft_opt.append(item)
 
+        # print(f"craft_opt: {craft_opt}")
         return craft_opt
     
 
@@ -178,33 +178,6 @@ class Morgan(object):
         self.inventory[item_to_pick] += 1
         self.num_items_in_inv += 1
 
-    def craft_item(self, agent_host, item):
-        """Creates item from the current inventory.
-
-        Raised assertion error if any item is missing and will stop the whole process.
-        (so don't call it unless you're sure you have all the items, that's why the craft_option
-        method is for :) )
-
-        It replaces the item in the inventory dictionary.
-        """
-
-        # if not self.is_near_block(agent_host, "crafting_table"):
-        #     print("Not near crafting table!")
-        #     return
-        #TODO: a
-
-        items_needed = food_recipes[item]
-        for item_needed in items_needed:
-            self.inventory[item_needed] -= 1
-            self.num_items_in_inv -= 1
-            if self.inventory[item_needed] < 0:
-                raise AssertionError('Missing items for crafting: %s in %s' % (item_needed, str(self.inventory_items)))
-
-        agent_host.sendCommand('craft %s' % item)
-        self.inventory[item] += 1
-        self.num_items_in_inv += 1
-        time.sleep(0.25)
-
     def get_block_position(self, agent_host, block_type, grid_name="floor_all", x_range=21, y_range=1, z_range=21, grid_min_x=-10, grid_min_z=-10, max_wait_seconds=5):
         start_time = time.time()
         while time.time() - start_time < max_wait_seconds:
@@ -272,6 +245,48 @@ class Morgan(object):
         print(f"[SUCCESS] Cooked {cooked_item}.")
         time.sleep(0.5)
 
+    def can_craft(self, agent_host, threshold=1.5):
+        table_x, table_z = self.get_block_position(agent_host, "crafting_table")
+        if table_x is None:
+            return False
+        obj_locs = self.get_obj_locations(agent_host)
+        if 'morgan' not in obj_locs:
+            print("morgan false location")
+            return False
+        _, agent_x, agent_z = obj_locs['morgan']
+        distance = math.sqrt((table_x)**2 + (table_z)**2)
+        print(f"Distance crafting table from agent: {distance}")
+        return distance <= threshold
+
+    def craft_item(self, agent_host, item):
+        if not self.can_craft(agent_host):
+            print("[INFO] Not close enough to a crafting table. Moving...")
+            table_x, table_z = self.get_block_position(agent_host, "crafting_table")
+            print(f"crafting_table: {table_x}, {table_z}")
+            if table_x is not None:
+                self.move_to(agent_host, table_x, table_z)
+
+
+        if item not in submission.food_recipes:
+            print(f"[ERROR] No recipe for {item}.")
+            return
+
+        ingredients = submission.food_recipes[item]
+        for item_needed in ingredients:
+            if self.inventory[item_needed] < ingredients.count(item_needed):
+                print(f"[ERROR] Not enough {item_needed} to craft {item}.")
+                return
+
+        for item_needed in ingredients:
+            self.inventory[item_needed] -= 1
+            self.num_items_in_inv -= 1
+
+        agent_host.sendCommand(f'craft {item}')
+        self.inventory[item] += 1
+        self.num_items_in_inv += 1
+        print(f"[SUCCESS] Crafted {item}.")
+        time.sleep(0.25)
+
     def present_gift(self, agent_host):
         """Calculates the reward points for the current inventory.
 
@@ -297,10 +312,8 @@ class Morgan(object):
         return submission.is_solution(reward)
 
     def get_possible_actions(self, agent_host, is_first_action=False):
-        """Returns all possible actions that can be done at the current state. """
         action_list = []
         if not is_first_action:
-            # Not allowing morgan to come back empty.
             action_list = ['present_gift']
 
         craft_opt = self.get_crafting_options()
@@ -335,7 +348,6 @@ class Morgan(object):
                 self.q_table[curr_state][action] = 0
 
         return submission.choose_action(curr_state, possible_actions, eps, self.q_table)
-
 
     def find_block_position(self, agent_host, block_type, max_wait_seconds=5):
         start_time = time.time()

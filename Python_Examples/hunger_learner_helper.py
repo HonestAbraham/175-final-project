@@ -5,19 +5,21 @@ items = [
     'porkchop',
     # 'fish',
     'rabbit',
-    'coal'
+    'coal',
 
+    'pumpkin',
+    'planks',
+    'planks'
 ]
 
 
-# food_recipes = {
+food_recipes = {
 #         'pumpkin_pie': ['pumpkin', 'egg', 'sugar'],
-#         'pumpkin_seeds': ['pumpkin'],
-#         'bowl': ['planks', 'planks'],
+        'pumpkin_seeds': ['pumpkin'],
+        'bowl': ['planks', 'planks'],
 #         'mushroom_stew': ['bowl', 'red_mushroom']
-#     }
+    }
 
-food_recipes = {}  
 
 
 cooking_recipes = {
@@ -34,7 +36,12 @@ rewards_map = {
     'coal': 0,
     'cooked_beef': 8,
     'cooked_porkchop': 8,
-    'cooked_rabbit': 5
+    'cooked_rabbit': 5,
+    
+    'pumpkin_seeds': 1,
+    'pumpkin': 0,
+    'bowl': 1,
+    'planks': 0
 }
 
 
