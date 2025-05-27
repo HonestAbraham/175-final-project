@@ -95,8 +95,8 @@ def GetMissionXML(summary):
                 </ObservationFromNearbyEntities>
                 <ObservationFromGrid>
                     <Grid name="floor_all">
-                        <min x="-10" y="0" z="-10"/>
-                        <max x="10" y="0" z="10"/>
+                        <min x="-10" y="226" z="-10"/>
+                        <max x="10" y="228" z="10"/>
                     </Grid>
                 </ObservationFromGrid>
                 <ObservationFromFullInventory/>

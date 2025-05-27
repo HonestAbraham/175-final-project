@@ -34,6 +34,7 @@ class Morgan(object):
         self.n, self.alpha, self.gamma = n, alpha, gamma
         self.inventory = defaultdict(lambda: 0, {})
         self.num_items_in_inv = 0
+        self.last_grid_obs = []
 
     def clear_inventory(self):
         """Resets the inventory in case of a new attempt to fetch. """
@@ -123,9 +124,11 @@ class Morgan(object):
                     good_frame = True
                     end_frame = timer()
 
-    def move_to(self, agent_host, target_x, target_z):
+    def move_to(self, agent_host, target_x, target_z, target_y=227):
         stuck_counter = 0
         prev_distance = float('inf')
+
+        print(f"target: {target_x}, {target_z}")
 
         while True:
             obj_locs = self.get_obj_locations(agent_host)
@@ -186,6 +189,7 @@ class Morgan(object):
                 try:
                     obs = json.loads(world_state.observations[-1].text)
                     if grid_name in obs:
+                        self.last_grid_obs = obs[grid_name]
                         grid = obs[grid_name]
                         for idx, block in enumerate(grid):
                             if block == block_type or block == f"lit_{block_type}":
@@ -203,7 +207,7 @@ class Morgan(object):
         print(f"[WARN] Could not find block '{block_type}' in grid '{grid_name}' within {max_wait_seconds} seconds")
         return None, None
 
-    def can_cook(self, agent_host, threshold=1.5):
+    def close_to_furnace(self, agent_host, threshold=1.5):
         furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
         if furnace_x is None:
             return False
@@ -219,7 +223,7 @@ class Morgan(object):
         return distance <= threshold
 
     def cook_item(self, agent_host, cooked_item):
-        if not self.can_cook(agent_host):
+        if not self.close_to_furnace(agent_host):
             print("[INFO] Not close enough to a furnace. Moving...")
             furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
             print(f"furnace: {furnace_x}, {furnace_z}")
@@ -245,7 +249,7 @@ class Morgan(object):
         print(f"[SUCCESS] Cooked {cooked_item}.")
         time.sleep(0.5)
 
-    def can_craft(self, agent_host, threshold=1.5):
+    def close_to_crafting_table(self, agent_host, threshold=1.5):
         table_x, table_z = self.get_block_position(agent_host, "crafting_table")
         if table_x is None:
             return False
@@ -259,11 +263,12 @@ class Morgan(object):
         return distance <= threshold
 
     def craft_item(self, agent_host, item):
-        if not self.can_craft(agent_host):
+        if not self.close_to_crafting_table(agent_host):
             print("[INFO] Not close enough to a crafting table. Moving...")
             table_x, table_z = self.get_block_position(agent_host, "crafting_table")
             print(f"crafting_table: {table_x}, {table_z}")
             if table_x is not None:
+                print("Does it ever go here?")
                 self.move_to(agent_host, table_x, table_z)
 
 
@@ -384,28 +389,51 @@ class Morgan(object):
         print(f"[WARN] Could not find block type '{block_type}' within {max_wait_seconds}s")
         return None, None
 
-
     def act(self, agent_host, action):
         print(action + ",", end=" ")
         if action == 'present_gift':
             return self.present_gift(agent_host)
+
         elif action.startswith('c_'):
-            # x, z = self.find_block_position(agent_host, "crafting_table")
-            # if x is not None:
-            #     self.move_to(agent_host, x, z)
+            obj_locs = self.get_obj_locations(agent_host)
+            y, curr_x, curr_z = obj_locs['morgan']
 
-            self.move_to(agent_host, 5, 5) #TODO: a.
-            self.craft_item(agent_host, action[2:])
+            #Looks for crafting table
+            grid_obs = self.last_grid_obs
+            path = submission.pathfindingSearch2D(
+                int(round(curr_x)), y, int(round(curr_z)),
+                5, y, 5, #TODO: Dynamically change
+                grid_obs, -10, 226, -10, 21, 3, 21
+            )
+            print(f"Path to crafting table: {path}")
+            for step_x, step_z in path[1:]:  # skip current position
+                self.move_to(agent_host, step_x, step_z)
+
+            # self.craft_item(agent_host, action[2:])
+            quit()
+
         elif action.startswith('cook_'):
-            # x, z = self.find_block_position(agent_host, "furnace")
-            # if x is not None:
-            #     self.move_to(agent_host, x, z)
+            obj_locs = self.get_obj_locations(agent_host)
+            y, curr_x, curr_z = obj_locs['morgan']
 
-            self.move_to(agent_host, -5, -5) #TODO: a.
+            #Looks for furnace
+            grid_obs = self.last_grid_obs
+            path = submission.pathfindingSearch2D(
+                int(round(curr_x)), y, int(round(curr_z)),
+                -5, y, -5, #TODO: Dynamically change
+                grid_obs, -10, 226, -10, 21, 3, 21
+            )
+            print(f"Path to furnace: {path}")
+            for step_x, step_z in path[1:]:
+                self.move_to(agent_host, step_x, step_z)
+
             self.cook_item(agent_host, action[len('cook_'):])
+
         else:
             self.fetch_item(agent_host, action)
+
         return 0
+
 
     def update_q_table(self, tau, S, A, R, T):
         """Performs relevant updates for state tau.
