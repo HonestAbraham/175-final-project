@@ -7,9 +7,9 @@ items = [
     'rabbit',
     'coal',
 
-    'pumpkin',
-    'planks',
-    'planks'
+    # 'pumpkin',
+    # 'planks',
+    # 'planks'
 ]
 
 

@@ -58,3 +58,24 @@ a. use furnace to cook and crafting table to craft
             - for example: current hunger is 8, eating a steak will result in 10 hunger, giving a reward of 2. But reward should actually be 8
 
 
+
+CHAI TO DO A*:
+Missing Maze Awareness 
+The A* algorithm needs to know about the maze obstacles to plan around them. Your current setup generates random obstacles, but there's no clear indication that the A* algorithm receives this obstacle information.
+
+Stuck Prevention Not Implemented 
+A* pathfinding can get stuck when agents try to follow paths without considering dynamic obstacles or when they encounter situations where the calculated path becomes invalid
+
+the agent itself is not taking in the obstacle properly
+the a* stuck prevention is weird as fuck
+make sure the maze is proper, like a path no random blocks\
+the agent still assumes that it reach the furnace by force move (FLAWED STUCK LOGIC)
+
+test case:
+box the agent with a wall
+make sure the agent reach the furnace to cook and dont skip it
+
+
+
+worst case:
+fuck the maze just put a the crafting table and furnace randomly already works

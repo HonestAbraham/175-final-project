@@ -394,14 +394,15 @@ class Morgan(object):
             # if x is not None:
             #     self.move_to(agent_host, x, z)
 
-            self.move_to(agent_host, 5, 5) #TODO: a.
+            # print("moving manually")
+            # self.move_to(agent_host, 5, 5) #TODO: a.
             self.craft_item(agent_host, action[2:])
         elif action.startswith('cook_'):
             # x, z = self.find_block_position(agent_host, "furnace")
             # if x is not None:
             #     self.move_to(agent_host, x, z)
 
-            self.move_to(agent_host, -5, -5) #TODO: a.
+            # self.move_to(agent_host, -5, -5) #TODO: a.
             self.cook_item(agent_host, action[len('cook_'):])
         else:
             self.fetch_item(agent_host, action)
@@ -486,3 +487,5 @@ class Morgan(object):
                         self.update_q_table(tau, S, A, R, T)
                     done_update = True
                     break
+
+
