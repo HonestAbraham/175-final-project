@@ -317,7 +317,7 @@ if __name__ == '__main__':
     n=1
     
     # Create original Morgan agent
-    morgan = Morgan(n=n)
+    morgan = Morgan(n=n, use_dqn=True)
     print("n=",n)
     print("Enhancing Morgan with A* pathfinding...")
     

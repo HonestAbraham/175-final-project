@@ -1,18 +1,27 @@
 from __future__ import division
-import numpy as np
 
-import MalmoPython
-import os
-import random
 import sys
 import time
 import json
-import random
 import math
-import errno
 import hunger_learner_helper as submission
 from collections import defaultdict, deque
 from timeit import default_timer as timer
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import math
+import random
+from collections import deque
+import numpy as np  
+
+
+from dqn_architecture import SimpleDQN, ReplayBuffer
+
+BATCH_SIZE = 32
+TARGET_UPDATE = 10   # how often (in episodes) to copy policy_net → target_net
+MAX_STEPS_PER_EPISODE = 1000
 
 items=submission.items
 inventory_limit = 3
@@ -21,7 +30,7 @@ rewards_map = submission.rewards_map
 cooking_recipe = submission.cooking_recipes
 
 class Morgan(object):
-    def __init__(self, alpha=0.3, gamma=1, n=1):
+    def __init__(self, alpha=0.3, gamma=1, n=1, use_dqn=False):
         """Constructing an RL agent.
 
         Args
@@ -29,11 +38,87 @@ class Morgan(object):
             gamma:  <float>  value decay rate   (default = 1)
             n:      <int>    number of back steps to update (default = 1)
         """
-        self.epsilon = 0.2  # chance of taking a random action instead of the best
-        self.q_table = {}
-        self.n, self.alpha, self.gamma = n, alpha, gamma
-        self.inventory = defaultdict(lambda: 0, {})
+        self.use_dqn = use_dqn
+        self.episode_rewards = []  # will store total reward per episode
+        self.loss_history    = []  # will store loss value per optimization step
+
+        if not use_dqn:
+
+            # ───── Tabular Q‐learning branch (unchanged) ─────
+            self.epsilon = 0.2
+            self.q_table = {}
+            self.n, self.alpha, self.gamma = n, alpha, gamma
+            self.inventory = defaultdict(lambda: 0)
+            self.num_items_in_inv = 0
+            return
+
+        # ───── NEW DQN SETUP ─────
+        self.inventory = defaultdict(lambda: 0)
         self.num_items_in_inv = 0
+
+        # 1) Build a combined list of raw + cooked item‐names
+        # ── UPDATED ──
+        raw_items    = submission.items[:]                           
+        cooked_items = list(submission.cooking_recipes.keys())       # ←==== use keys(), not values()
+        # Union them (avoid duplicates):
+        self.item_list      = raw_items + [ci for ci in cooked_items if ci not in raw_items]
+        self.num_item_types = len(self.item_list)
+        # ──────────────────────────────────
+           # e.g. now = 6 or 7
+
+        self.inventory_limit = 3
+        self.gamma           = 0.99
+        self.eps_start       = 1.0
+        self.eps_end         = 0.1
+        self.eps_decay       = 20000
+        self.epsilon         = self.eps_start
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Build a fixed list of all possible actions (fetch, craft, cook, present_gift):
+        self.all_actions = self._build_all_actions_list()
+        self.num_actions = len(self.all_actions)
+
+        # Initialize policy_net and target_net
+        hidden_dim = 128
+        self.policy_net = SimpleDQN(self.num_item_types, hidden_dim, self.num_actions).to(self.device)
+        self.target_net = SimpleDQN(self.num_item_types, hidden_dim, self.num_actions).to(self.device)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+        self.target_net.eval()
+
+        # Replay buffer + optimizer + loss
+        self.memory    = ReplayBuffer(capacity=10000)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-3)
+        self.criterion = nn.MSELoss()
+        self.steps_done = 0
+        self.episode_counter = 0    # ←–– initialize so you can safely do self.episode_counter+1 in run()
+
+
+    def _build_all_actions_list(self):
+        actions = []
+        # (1) Every “fetch” action for raw items:
+        for it in submission.items:
+            actions.append(it)
+        # (2) Every “craft” action “c_<food_name>”:
+        for k in submission.food_recipes:
+            actions.append(f"c_{k}")
+        # (3) Every “cook” action “cook_<food_name>”:
+        for k in submission.cooking_recipes:
+            actions.append(f"cook_{k}")
+        # (4) Terminal “present_gift”
+        actions.append("present_gift")
+        return actions
+
+    def state_to_tensor(self, state_tuple):
+        """
+        Convert a state_tuple like (('beef',1), ('cooked_porkchop',2), …)
+        into a 1×num_item_types tensor of normalized counts.
+        """
+        vec = torch.zeros(self.num_item_types, dtype=torch.float, device=self.device)
+        for (item_name, count) in state_tuple:
+            idx = self.item_list.index(item_name)  # ←==== UPDATED
+            vec[idx] = count / float(self.inventory_limit)
+        return vec
 
     def clear_inventory(self):
         """Resets the inventory in case of a new attempt to fetch. """
@@ -61,7 +146,6 @@ class Morgan(object):
         # print(f"craft_opt: {craft_opt}")
         return craft_opt
     
-
     @staticmethod
     def get_obj_locations(agent_host):
         """Queries for the object's location in the world.
@@ -157,7 +241,6 @@ class Morgan(object):
 
         agent_host.sendCommand("move 0")
         agent_host.sendCommand("sprint 0")
-
 
     def fetch_item(self, agent_host, item_to_pick):  
         if self.num_items_in_inv > inventory_limit:
@@ -339,15 +422,66 @@ class Morgan(object):
         """
         return submission.get_curr_state(self.inventory.items())
 
-    def choose_action(self, curr_state, possible_actions, eps):
-        """Chooses an action according to eps-greedy policy. """
-        if curr_state not in self.q_table:
-            self.q_table[curr_state] = {}
-        for action in possible_actions:
-            if action not in self.q_table[curr_state]:
-                self.q_table[curr_state][action] = 0
+    def choose_action(self, curr_state, possible_actions, is_first_action=False):
+        if not self.use_dqn:
+            # Fallback to existing tabular logic:
+            if curr_state not in self.q_table:
+                self.q_table[curr_state] = {}
+            for action in possible_actions:
+                if action not in self.q_table[curr_state]:
+                    self.q_table[curr_state][action] = 0
+            return submission.choose_action(curr_state, possible_actions, self.epsilon, self.q_table)
 
-        return submission.choose_action(curr_state, possible_actions, eps, self.q_table)
+        # ----- DQN ε-greedy policy -----
+        state_tensor = self.state_to_tensor(curr_state).unsqueeze(0)   # shape: (1, num_item_types)
+        sample = random.random()
+        eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
+                        math.exp(-1. * self.steps_done / self.eps_decay)
+        self.steps_done += 1
+
+        # Get all Q-values from policy_net
+        with torch.no_grad():
+            q_values_all = self.policy_net(state_tensor).squeeze(0)     # shape: (num_actions,)
+        # Build legal‐action mask
+        legal_indices = [self.all_actions.index(a) for a in possible_actions]
+        illegal_indices = list(set(range(self.num_actions)) - set(legal_indices))
+
+        if sample < eps_threshold:
+            # random legal action
+            action_idx = random.choice(legal_indices)
+        else:
+            # mask illegal actions to −∞ so they’re never chosen
+            for idx in illegal_indices:
+                q_values_all[idx] = float("-inf")
+            action_idx = torch.argmax(q_values_all).item()
+
+        action_str = self.all_actions[action_idx]
+        return action_idx, action_str
+
+    def optimize_model(self):
+        if len(self.memory) < BATCH_SIZE:
+            return None
+
+        transitions = self.memory.sample(BATCH_SIZE)
+        batch = list(zip(*transitions))
+        state_batch      = torch.stack([self.state_to_tensor(s)  for s  in batch[0]]).to(self.device)
+        action_batch     = torch.tensor(batch[1], dtype=torch.long, device=self.device)
+        reward_batch     = torch.tensor(batch[2], dtype=torch.float, device=self.device)
+        next_state_batch = torch.stack([self.state_to_tensor(s2) for s2 in batch[3]]).to(self.device)
+        done_batch       = torch.tensor(batch[4], dtype=torch.float, device=self.device)
+
+        q_values = self.policy_net(state_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)
+
+        with torch.no_grad():
+            next_q_values = self.target_net(next_state_batch).max(dim=1)[0]
+            target_q      = reward_batch + (self.gamma * next_q_values * (1 - done_batch))
+
+        loss = self.criterion(q_values, target_q)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss
 
     def find_block_position(self, agent_host, block_type, max_wait_seconds=5):
         start_time = time.time()
@@ -383,7 +517,6 @@ class Morgan(object):
 
         print(f"[WARN] Could not find block type '{block_type}' within {max_wait_seconds}s")
         return None, None
-
 
     def act(self, agent_host, action):
         print(action + ",", end=" ")
@@ -428,64 +561,122 @@ class Morgan(object):
 
     def best_policy(self, agent_host):
         """Reconstructs the best action list according to the greedy policy. """
+        if not self.use_dqn:
+            # Fallback to original tabular version
+            ...
+            return
+
+        # --- DQN greedy rollout (ε=0) ---
         self.clear_inventory()
+        state = self.get_curr_state()
         policy = []
-        current_r = 0
-        is_first_action = True
-        next_a = ""
-        while next_a != "present_gift":
-            curr_state = self.get_curr_state()
-            possible_actions = self.get_possible_actions(agent_host, is_first_action)
-            next_a = self.choose_action(curr_state, possible_actions, 0)
-            policy.append(next_a)
-            is_first_action = False
-            current_r = self.act(agent_host, next_a)
-        print(' with reward %.1f' % (current_r))
-        return self.is_solution(current_r)
-        #print 'Best policy so far is %s with reward %.1f' % (policy, current_r)
+        while True:
+            possible_actions = self.get_possible_actions(agent_host, is_first_action=(len(policy) == 0))
+            # Get Q-values
+            state_tensor = self.state_to_tensor(state).unsqueeze(0)
+            with torch.no_grad():
+                q_all = self.policy_net(state_tensor).squeeze(0)
+            # Mask illegal actions
+            legal_indices = [self.all_actions.index(a) for a in possible_actions]
+            illegal_indices = list(set(range(self.num_actions)) - set(legal_indices))
+            for idx in illegal_indices:
+                q_all[idx] = float("-inf")
+            action_idx = torch.argmax(q_all).item()
+            action_str = self.all_actions[action_idx]
+            policy.append(action_str)
+            reward = self.act(agent_host, action_str)
+            if action_str == "present_gift":
+                break
+            state = self.get_curr_state()
+
+        print("Best DQN policy:", policy, "Reward:", reward)
+        return submission.is_solution(reward)
 
     def run(self, agent_host):
-        """Learns the process to compile the best gift for dad. """
-        S, A, R = deque(), deque(), deque()
-        present_reward = 0
-        done_update = False
-        while not done_update:
-            s0 = self.get_curr_state()
-            possible_actions = self.get_possible_actions(agent_host, True)
-            a0 = self.choose_action(s0, possible_actions, self.epsilon)
-            S.append(s0)
-            A.append(a0)
-            R.append(0)
+        if not self.use_dqn:
+            # Fallback to original tabular run
+            # (copy‐paste the old code here)
+            S, A, R = deque(), deque(), deque()
+            present_reward = 0
+            done_update = False
+            while not done_update:
+                s0 = self.get_curr_state()
+                possible_actions = self.get_possible_actions(agent_host, True)
+                a0 = self.choose_action(s0, possible_actions, self.epsilon)
+                S.append(s0)
+                A.append(a0)
+                R.append(0)
 
-            T = sys.maxsize
-            for t in range(sys.maxsize):
-                time.sleep(0.1)
-                if t < T:
-                    current_r = self.act(agent_host, A[-1])
-                    R.append(current_r)
+                T = sys.maxsize
+                for t in range(sys.maxsize):
+                    time.sleep(0.1)
+                    if t < T:
+                        current_r = self.act(agent_host, A[-1])
+                        R.append(current_r)
 
-                    if A[-1] == "present_gift":
-                        # Terminating state
-                        T = t + 1
-                        S.append('Term State')
-                        present_reward = current_r
-                        print("Reward:", present_reward)
-                    else:
-                        s = self.get_curr_state()
-                        S.append(s)
-                        possible_actions = self.get_possible_actions(agent_host)
-                        next_a = self.choose_action(s, possible_actions, self.epsilon)
-                        A.append(next_a)
+                        if A[-1] == "present_gift":
+                            # Terminating state
+                            T = t + 1
+                            S.append('Term State')
+                            present_reward = current_r
+                            print("Reward:", present_reward)
+                        else:
+                            s = self.get_curr_state()
+                            S.append(s)
+                            possible_actions = self.get_possible_actions(agent_host)
+                            next_a = self.choose_action(s, possible_actions, self.epsilon)
+                            A.append(next_a)
 
-                tau = t - self.n + 1
-                if tau >= 0:
-                    self.update_q_table(tau, S, A, R, T)
-
-                if tau == T - 1:
-                    while len(S) > 1:
-                        tau = tau + 1
+                    tau = t - self.n + 1
+                    if tau >= 0:
                         self.update_q_table(tau, S, A, R, T)
-                    done_update = True
-                    break
 
+                    if tau == T - 1:
+                        while len(S) > 1:
+                            tau = tau + 1
+                            self.update_q_table(tau, S, A, R, T)
+                        done_update = True
+                        break
+            return
 
+        # --- New DQN training loop ---
+        state = self.get_curr_state()
+        total_reward = 0.0
+
+        for t in range(MAX_STEPS_PER_EPISODE):
+            possible_actions = self.get_possible_actions(agent_host, is_first_action=(t == 0))
+            action_idx, action_str = self.choose_action(state, possible_actions, is_first_action=(t == 0))
+            reward = self.act(agent_host, action_str)
+            total_reward += reward
+
+            next_state = self.get_curr_state()
+            done = (action_str == "present_gift")
+
+            self.memory.push(state, action_idx, reward, next_state, done)
+            state = next_state
+
+            loss = self.optimize_model()
+            if loss is not None:
+                self.loss_history.append(loss.item())
+
+            if done:
+                break
+
+        # ←–– Episode has ended here ––→
+
+        # 1) Record total_reward
+        self.episode_rewards.append(total_reward)
+
+        # 2) Print a per‐episode summary:
+        print(
+            f"Episode {self.episode_counter+1:4d} | "
+            f"TotalReward: {total_reward:.1f} | "
+            f"Epsilon: {self.epsilon:.3f} | "
+            f"RecentAvgLoss: {np.mean(self.loss_history[-10:]):.4f}"
+        )
+
+        # 3) Update target network every TARGET_UPDATE episodes:
+        prev_count = getattr(self, "episode_counter", 0)
+        self.episode_counter = prev_count + 1
+        if self.episode_counter % TARGET_UPDATE == 0:
+            self.target_net.load_state_dict(self.policy_net.state_dict())
