@@ -3,6 +3,8 @@ import math
 import json
 import time
 from typing import List, Tuple, Set, Optional, Dict
+from collections import deque
+import sys
 
 # Import Morgan and related modules from your existing file
 from Morgan_agent import Morgan
@@ -54,7 +56,7 @@ class MorganPathfinder:
                     if 'floor_all' in obs:
                         self.floor_grid = obs['floor_all']
                         self._update_obstacles()
-                        print(f"[PATHFINDER] Updated obstacles from world state: {len(self.obstacles)} obstacles found")
+                        # print(f"[PATHFINDER] Updated obstacles from world state: {len(self.obstacles)} obstacles found")
                         return True
                 except Exception as e:
                     print(f"Error parsing observation: {e}")
@@ -84,11 +86,32 @@ class MorganPathfinder:
                 if block not in ['crafting_table', 'furnace', 'lit_furnace']:
                     self.obstacles.add((world_x, world_z))
     
-    def is_valid_position(self, x: int, z: int) -> bool:
-        """Check if position is within bounds and not blocked"""
-        return (self.grid_min <= x <= self.grid_max and 
-                self.grid_min <= z <= self.grid_max and 
-                (x, z) not in self.obstacles)
+    def is_valid_position(self, x: int, z: int, target_pos=None) -> bool:
+        """
+        Check if position is within bounds and not blocked
+        Args:
+            x, z: Position to check
+            target_pos: If provided, this is our destination - allow movement to furnace/crafting table if this is our target
+        """
+        # Basic bounds check
+        if not (self.grid_min <= x <= self.grid_max and self.grid_min <= z <= self.grid_max):
+            return False
+            
+        pos = (x, z)
+        
+        # If this is our target position, it's valid even if it's a furnace or crafting table
+        if target_pos and pos == target_pos:
+            return True
+            
+        # Check if it's an obstacle
+        is_blocked = pos in self.obstacles
+        
+        # Log obstacle detection
+        if is_blocked:
+            # print(f"[A*] Position {pos} is blocked by obstacle")
+            pass
+            
+        return not is_blocked
     
     def manhattan_distance(self, pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
         """Calculate Manhattan distance between two positions"""
@@ -156,84 +179,121 @@ class MorganPathfinder:
         A* pathfinding algorithm with 4-directional movement for reliable navigation
         Returns: List of (x, z) coordinates representing the path, or None if no path found
         """
+        # print(f"\n[A*] Starting pathfinding from {start} to {goal}")
+        
         # Convert to integers and validate
         start = (int(round(start[0])), int(round(start[1])))
         goal = (int(round(goal[0])), int(round(goal[1])))
         
-        if not self.is_valid_position(start[0], start[1]):
-            print(f"[WARN] Start position {start} is not valid")
+        # Special handling: if goal is furnace/crafting table, temporarily remove it from obstacles
+        is_special_target = goal in self.furnace_positions or goal in self.crafting_positions
+        if is_special_target:
+            # print(f"[A*] Goal is a special target (furnace/crafting table)")
+            self.obstacles.discard(goal)
+        
+        if not self.is_valid_position(start[0], start[1], goal):
+            # print(f"[A*] Invalid start position {start}")
             return None
             
-        if not self.is_valid_position(goal[0], goal[1]):
-            print(f"[WARN] Goal position {goal} is not valid")
+        if not self.is_valid_position(goal[0], goal[1], goal):
+            # print(f"[A*] Invalid goal position {goal}")
             return None
         
         if start == goal:
+            # print("[A*] Start and goal are the same")
             return [start]
+        
+        # print(f"[A*] Number of obstacles: {len(self.obstacles)}")
+        # print(f"[A*] Obstacles near path: {[obs for obs in self.obstacles if self.manhattan_distance(obs, start) <= 5 or self.manhattan_distance(obs, goal) <= 5]}")
         
         open_set = []
         closed_set = set()
+        came_from = {}
         
         # Use Manhattan distance for 4-directional movement
         start_node = Node(start[0], start[1], 0, self.manhattan_distance(start, goal))
         heapq.heappush(open_set, start_node)
-        
-        # Dictionary to track the best g_cost for each position
         g_costs = {start: 0}
         
-        while open_set:
+        moves = [(0, 1), (1, 0), (0, -1), (-1, 0)]  # 4-directional movement
+        iterations = 0
+        max_iterations = 1000  # Prevent infinite loops
+        
+        while open_set and iterations < max_iterations:
+            iterations += 1
             current = heapq.heappop(open_set)
             current_pos = (current.x, current.z)
             
             if current_pos == goal:
-                # Reconstruct path
-                path = []
-                while current:
-                    path.append((current.x, current.z))
-                    current = current.parent
-                return path[::-1]  # Reverse to get path from start to goal
+                # print(f"[A*] Path found after {iterations} iterations")
+                path = self._reconstruct_path(came_from, current_pos)
+                # print(f"[A*] Path length: {len(path)}")
+                return path
             
+            if current_pos in closed_set:
+                continue
+                
             closed_set.add(current_pos)
             
-            for neighbor_x, neighbor_z in self.get_neighbors(current):
-                neighbor_pos = (neighbor_x, neighbor_z)
+            # Try each possible move
+            for dx, dz in moves:
+                next_x, next_z = current.x + dx, current.z + dz
+                next_pos = (next_x, next_z)
                 
-                if neighbor_pos in closed_set:
+                if not self.is_valid_position(next_x, next_z, goal):
                     continue
+                    
+                # Calculate new cost
+                new_g_cost = g_costs[current_pos] + 1
                 
-                # Calculate movement cost (uniform cost for 4-directional)
-                move_cost = self.get_movement_cost(current_pos, neighbor_pos)
-                tentative_g = current.g_cost + move_cost
-                
-                # If we found a better path to this neighbor
-                if neighbor_pos not in g_costs or tentative_g < g_costs[neighbor_pos]:
-                    g_costs[neighbor_pos] = tentative_g
-                    h_cost = self.manhattan_distance(neighbor_pos, goal)
-                    neighbor_node = Node(neighbor_x, neighbor_z, tentative_g, h_cost, current)
-                    heapq.heappush(open_set, neighbor_node)
+                # If we've found a better path to this position
+                if next_pos not in g_costs or new_g_cost < g_costs[next_pos]:
+                    g_costs[next_pos] = new_g_cost
+                    f_cost = new_g_cost + self.manhattan_distance(next_pos, goal)
+                    next_node = Node(next_x, next_z, new_g_cost, f_cost)
+                    heapq.heappush(open_set, next_node)
+                    came_from[next_pos] = current_pos
         
-        return None  # No path found
+        # print(f"[A*] No path found after {iterations} iterations")
+        return None
+
+    def _reconstruct_path(self, came_from: Dict[Tuple[int, int], Tuple[int, int]], current: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Reconstruct the path from the came_from dictionary"""
+        path = [current]
+        while current in came_from:
+            current = came_from[current]
+            path.append(current)
+        path.reverse()
+        
+        # Log path details
+        # print("[A*] Path waypoints:")
+        # for i, point in enumerate(path):
+        #     print(f"  {i}: {point}")
+        
+        return path
     
-    # Add this method to MorganPathfinder class
     def set_known_obstacles(self, obstacles, furnace_pos=None, crafting_pos=None):
         """Set obstacles directly from mission generation"""
         self.obstacles.clear()
         
-        for x, z, block_type in obstacles:
-            # Don't mark crafting tables and furnaces as obstacles
-            if block_type not in ['crafting_table', 'furnace']:
-                self.obstacles.add((x, z))
+        # Store furnace and crafting table positions for later use
+        self.furnace_positions = [furnace_pos] if furnace_pos else []
+        self.crafting_positions = [crafting_pos] if crafting_pos else []
         
-        # Store furnace and crafting table positions
+        # Add all obstacles including furnace and crafting table positions
+        for x, z, block_type in obstacles:
+            self.obstacles.add((x, z))
+            
+        # Add furnace and crafting table to obstacles
         if furnace_pos:
-            self.furnace_positions = [furnace_pos]
+            self.obstacles.add(furnace_pos)
         if crafting_pos:
-            self.crafting_positions = [crafting_pos]
+            self.obstacles.add(crafting_pos)
         
         print(f"[PATHFINDER] Set {len(self.obstacles)} known obstacles")
         print(f"[PATHFINDER] Known furnace at {furnace_pos}")
         print(f"[PATHFINDER] Known crafting table at {crafting_pos}")
-
+        
     # Replace the existing path_to_crafting_table method
     def path_to_crafting_table(self, agent_host) -> Optional[List[Tuple[int, int]]]:
         """Find path to nearest crafting table using known positions"""
@@ -249,17 +309,17 @@ class MorganPathfinder:
             # Use known crafting table positions if available
             if hasattr(self, 'crafting_positions') and self.crafting_positions:
                 crafting_table_pos = self.crafting_positions[0]
-                print(f"[INFO] Using known crafting table position: {crafting_table_pos}")
+                # print(f"[INFO] Using known crafting table position: {crafting_table_pos}")
             else:
                 # Fall back to discovery method
                 crafting_table_pos = self.find_nearest_block(agent_host, start_pos, "crafting_table")
-                print("[INFO] Using discovered crafting table position")
+                # print("[INFO] Using discovered crafting table position")
             
             if not crafting_table_pos:
                 print("[ERROR] No crafting table found")
                 return None
             
-            print(f"[INFO] Finding path from {start_pos} to crafting table at {crafting_table_pos}")
+            # print(f"[INFO] Finding path from {start_pos} to crafting table at {crafting_table_pos}")
             return self.a_star(start_pos, crafting_table_pos)
             
         except Exception as e:
@@ -281,17 +341,17 @@ class MorganPathfinder:
             # Use known furnace positions if available
             if hasattr(self, 'furnace_positions') and self.furnace_positions:
                 furnace_pos = self.furnace_positions[0]
-                print(f"[INFO] Using known furnace position: {furnace_pos}")
+                # print(f"[INFO] Using known furnace position: {furnace_pos}")
             else:
                 # Fall back to discovery method
                 furnace_pos = self.find_nearest_block(agent_host, start_pos, "furnace")
-                print("[INFO] Using discovered furnace position")
+                # print("[INFO] Using discovered furnace position")
             
             if not furnace_pos:
                 print("[ERROR] No furnace found")
                 return None
             
-            print(f"[INFO] Finding path from {start_pos} to furnace at {furnace_pos}")
+            # print(f"[INFO] Finding path from {start_pos} to furnace at {furnace_pos}")
             return self.a_star(start_pos, furnace_pos)
             
         except Exception as e:
@@ -310,7 +370,7 @@ class MorganWithPathfinding:
     
     def smart_move_to_crafting_table(self, agent_host):
         """Use A* to move to nearest crafting table"""
-        print("[INFO] Starting smart move to crafting table...")
+        # print("[INFO] Starting smart move to crafting table...")
         
         # Ensure the world state is updated even if we have known positions
         self.pathfinder.update_world_state(agent_host)
@@ -327,32 +387,32 @@ class MorganWithPathfinding:
             # Use known crafting table positions if available
             if hasattr(self.pathfinder, 'crafting_positions') and self.pathfinder.crafting_positions:
                 crafting_table_pos = self.pathfinder.crafting_positions[0]
-                print(f"[INFO] Using known crafting table position: {crafting_table_pos}")
+                # print(f"[INFO] Using known crafting table position: {crafting_table_pos}")
             else:
                 # Fall back to discovery method
                 crafting_table_pos = self.pathfinder.find_nearest_block(agent_host, start_pos, "crafting_table")
-                print("[INFO] Using discovered crafting table position")
+                # print("[INFO] Using discovered crafting table position")
             
             if not crafting_table_pos:
                 print("[ERROR] No crafting table found, falling back to direct movement")
                 table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
                 if table_x is not None:
-                    print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
+                    # print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
                     self.morgan.move_to(agent_host, table_x, table_z)
                 return
             
-            print(f"[INFO] Finding path from {start_pos} to crafting table at {crafting_table_pos}")
+            # print(f"[INFO] Finding path from {start_pos} to crafting table at {crafting_table_pos}")
             path = self.pathfinder.a_star(start_pos, crafting_table_pos)
             
             if not path:
                 print("[WARN] No A* path found to crafting table, falling back to direct movement")
                 table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
                 if table_x is not None:
-                    print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
+                    # print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
                     self.morgan.move_to(agent_host, table_x, table_z)
                 return
             
-            print(f"[INFO] Found A* path with {len(path)} steps: {path}")
+            # print(f"[INFO] Found A* path with {len(path)} steps: {path}")
             # Execute path - this actually moves Morgan
             self.execute_path(agent_host, path)
             
@@ -361,12 +421,12 @@ class MorganWithPathfinding:
             # Fallback to direct movement
             table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
             if table_x is not None:
-                print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
+                # print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
                 self.morgan.move_to(agent_host, table_x, table_z)
     
     def smart_move_to_furnace(self, agent_host):
         """Use A* to move to nearest furnace"""
-        print("[INFO] Starting smart move to furnace...")
+        # print("[INFO] Starting smart move to furnace...")
         
         # Ensure the world state is updated even if we have known positions
         self.pathfinder.update_world_state(agent_host)
@@ -383,32 +443,32 @@ class MorganWithPathfinding:
             # Use known furnace positions if available
             if hasattr(self.pathfinder, 'furnace_positions') and self.pathfinder.furnace_positions:
                 furnace_pos = self.pathfinder.furnace_positions[0]
-                print(f"[INFO] Using known furnace position: {furnace_pos}")
+                # print(f"[INFO] Using known furnace position: {furnace_pos}")
             else:
                 # Fall back to discovery method
                 furnace_pos = self.pathfinder.find_nearest_block(agent_host, start_pos, "furnace")
-                print("[INFO] Using discovered furnace position")
+                # print("[INFO] Using discovered furnace position")
             
             if not furnace_pos:
                 print("[ERROR] No furnace found, falling back to direct movement")
                 furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
                 if furnace_x is not None:
-                    print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
+                    # print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
                     self.morgan.move_to(agent_host, furnace_x, furnace_z)
                 return
             
-            print(f"[INFO] Finding path from {start_pos} to furnace at {furnace_pos}")
+            # print(f"[INFO] Finding path from {start_pos} to furnace at {furnace_pos}")
             path = self.pathfinder.a_star(start_pos, furnace_pos)
             
             if not path:
                 print("[WARN] No A* path found to furnace, falling back to direct movement")
                 furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
                 if furnace_x is not None:
-                    print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
+                    # print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
                     self.morgan.move_to(agent_host, furnace_x, furnace_z)
                 return
             
-            print(f"[INFO] Found A* path with {len(path)} steps: {path}")
+            # print(f"[INFO] Found A* path with {len(path)} steps: {path}")
             # Execute path - this actually moves Morgan
             self.execute_path(agent_host, path)
             
@@ -417,12 +477,12 @@ class MorganWithPathfinding:
             # Fallback to direct movement
             furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
             if furnace_x is not None:
-                print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
+                # print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
                 self.morgan.move_to(agent_host, furnace_x, furnace_z)
     
     def execute_path(self, agent_host, path: List[Tuple[int, int]]):
         """Execute a path by moving through each waypoint with improved obstacle handling"""
-        print(f"[INFO] Executing path with {len(path)} waypoints")
+        # print(f"[INFO] Executing path with {len(path)} waypoints")
         
         if not path or len(path) < 2:
             print("[WARN] Path is too short to execute")
@@ -437,7 +497,7 @@ class MorganWithPathfinding:
         last_pos = None
         
         for i, (target_x, target_z) in enumerate(path[1:], 1):  # Skip first point (current position)
-            print(f"[INFO] Moving to waypoint {i}/{len(path)-1}: ({target_x}, {target_z})")
+            # print(f"[INFO] Moving to waypoint {i}/{len(path)-1}: ({target_x}, {target_z})")
             
             # Add a small offset to help the agent reach the center of cells
             adjusted_x = target_x + 0.5
@@ -467,7 +527,7 @@ class MorganWithPathfinding:
                 
                 # Calculate distance to target
                 distance = math.sqrt((curr_x - target_x)**2 + (curr_z - target_z)**2)
-                print(f"[INFO] Distance to target: {distance:.2f}")
+                # print(f"[INFO] Distance to target: {distance:.2f}")
                 
                 # Check if we've moved at all
                 movement_distance = math.sqrt(
@@ -496,11 +556,11 @@ class MorganWithPathfinding:
                         # Recalculate path from current position to destination
                         current_pos = (int(round(curr_x)), int(round(curr_z)))
                         destination = path[-1]
-                        print(f"[INFO] Recalculating path from {current_pos} to {destination}")
+                        # print(f"[INFO] Recalculating path from {current_pos} to {destination}")
                         
                         new_path = self.pathfinder.a_star(current_pos, destination)
                         if new_path and len(new_path) > 1:
-                            print(f"[INFO] Found new path with {len(new_path)} waypoints")
+                            # print(f"[INFO] Found new path with {len(new_path)} waypoints")
                             # Recursively execute the new path, reset stuck counter
                             stuck_count = 0
                             self.execute_path(agent_host, new_path)
@@ -512,7 +572,7 @@ class MorganWithPathfinding:
                             return
                     
                     # Try a small "wiggle" maneuver to unstick
-                    print("[INFO] Attempting unstick maneuver")
+                    # print("[INFO] Attempting unstick maneuver")
                     
                     # Get current orientation and try moving sideways briefly
                     self.morgan.turn_by(agent_host, 90)  # Turn right
@@ -531,7 +591,7 @@ class MorganWithPathfinding:
                 
                 # If we're close enough to target, move to next waypoint
                 if distance <= threshold:
-                    print(f"[INFO] Reached waypoint {i}")
+                    # print(f"[INFO] Reached waypoint {i}")
                     continue
                 
                 # If we're not close enough, but we've moved, try again or skip
@@ -539,23 +599,23 @@ class MorganWithPathfinding:
                     # If we've made progress but haven't reached the target, we can continue
                     # to the next waypoint if we're getting closer to the final destination
                     if movement_distance > 0.5:
-                        print(f"[INFO] Made progress toward waypoint {i}, continuing to next")
+                        # print(f"[INFO] Made progress toward waypoint {i}, continuing to next")
                         continue
                 else:  # For final waypoint
                     # For the final waypoint, make extra attempts to reach it exactly
                     if distance > threshold:
                         print(f"[WARN] Failed to reach final waypoint, distance: {distance:.2f}")
-                        print(f"[INFO] Making final approach to destination")
+                        # print(f"[INFO] Making final approach to destination")
                         
                         # For known locations, use their specific approach methods
                         destination = path[-1]
                         if (hasattr(self.pathfinder, 'crafting_positions') and 
                             destination in self.pathfinder.crafting_positions):
-                            print("[INFO] Making final approach to crafting table")
+                            # print("[INFO] Making final approach to crafting table")
                             self.morgan.approach_crafting_table(agent_host)
                         elif (hasattr(self.pathfinder, 'furnace_positions') and 
                               destination in self.pathfinder.furnace_positions):
-                            print("[INFO] Making final approach to furnace")
+                            # print("[INFO] Making final approach to furnace")
                             self.morgan.approach_furnace(agent_host)
                         else:
                             # One last direct movement attempt
@@ -576,11 +636,11 @@ class MorganWithPathfinding:
                 # For known functional locations, try direct approach methods
                 if (hasattr(self.pathfinder, 'crafting_positions') and 
                     (final_x, final_z) in self.pathfinder.crafting_positions):
-                    print("[INFO] Making final approach to crafting table")
+                    # print("[INFO] Making final approach to crafting table")
                     self.morgan.approach_crafting_table(agent_host)
                 elif (hasattr(self.pathfinder, 'furnace_positions') and 
                       (final_x, final_z) in self.pathfinder.furnace_positions):
-                    print("[INFO] Making final approach to furnace")
+                    # print("[INFO] Making final approach to furnace")
                     self.morgan.approach_furnace(agent_host)
         else:
             print("[ERROR] Could not verify final position")
@@ -595,7 +655,7 @@ def enhance_morgan_with_pathfinding(morgan_agent):
     # Replace the craft_item method to use smart pathfinding
     def enhanced_craft_item(agent_host, item):
         if not enhanced_morgan.morgan.can_craft(agent_host):
-            print("[INFO] Not close enough to a crafting table. Using A* pathfinding...")
+            # print("[INFO] Not close enough to a crafting table. Using A* pathfinding...")
             enhanced_morgan.smart_move_to_crafting_table(agent_host)
         
         # Continue with original crafting logic
@@ -622,7 +682,7 @@ def enhance_morgan_with_pathfinding(morgan_agent):
     # Replace the cook_item method to use smart pathfinding
     def enhanced_cook_item(agent_host, cooked_item):
         if not enhanced_morgan.morgan.can_cook(agent_host):
-            print("[INFO] Not close enough to a furnace. Using A* pathfinding...")
+            # print("[INFO] Not close enough to a furnace. Using A* pathfinding...")
             enhanced_morgan.smart_move_to_furnace(agent_host)
 
         if cooked_item not in submission.cooking_recipes:

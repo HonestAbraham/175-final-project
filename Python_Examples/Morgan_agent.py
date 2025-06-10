@@ -42,8 +42,11 @@ class Morgan(object):
         self.episode_rewards = []  # will store total reward per episode
         self.loss_history    = []  # will store loss value per optimization step
 
-        if not use_dqn:
+        # Initialize pathfinder
+        from a_star import MorganPathfinder
+        self.pathfinder = MorganPathfinder()
 
+        if not use_dqn:
             # ───── Tabular Q‐learning branch (unchanged) ─────
             self.epsilon = 0.2
             self.q_table = {}
@@ -96,16 +99,16 @@ class Morgan(object):
 
     def _build_all_actions_list(self):
         actions = []
-        # (1) Every “fetch” action for raw items:
+        # (1) Every "fetch" action for raw items:
         for it in submission.items:
             actions.append(it)
-        # (2) Every “craft” action “c_<food_name>”:
+        # (2) Every "craft" action "c_<food_name>":
         for k in submission.food_recipes:
             actions.append(f"c_{k}")
-        # (3) Every “cook” action “cook_<food_name>”:
+        # (3) Every "cook" action "cook_<food_name>":
         for k in submission.cooking_recipes:
             actions.append(f"cook_{k}")
-        # (4) Terminal “present_gift”
+        # (4) Terminal "present_gift"
         actions.append("present_gift")
         return actions
 
@@ -208,60 +211,100 @@ class Morgan(object):
                     end_frame = timer()
 
     def move_to(self, agent_host, target_x, target_z):
-        stuck_counter = 0
-        prev_distance = float('inf')
-
-        while True:
-            obj_locs = self.get_obj_locations(agent_host)
-            _, curr_x, curr_z = obj_locs['morgan']
-            dx = target_x - curr_x
-            dz = target_z - curr_z
-            distance = math.sqrt(dx**2 + dz**2)
-
-            angle_to_target = math.degrees(math.atan2(-dx, dz)) % 360
-            agent_host.sendCommand(f"setYaw {angle_to_target}")
-            time.sleep(0.1)
-            agent_host.sendCommand("sprint 1")
-            agent_host.sendCommand("move 1")
-
-            if distance <= 0.5:
-                break
-
-            if abs(distance - prev_distance) < 0.001:
-                stuck_counter += 1
-            else:
-                stuck_counter = 0
-
-            if stuck_counter > 10:
-                print("[WARN] Agent seems stuck. Forcing move stop.")
-                break
-
-            prev_distance = distance
-            time.sleep(0.2)
-
+        """Move to a target position one block at a time"""
+        # print(f"[MOVE] Starting movement to ({target_x}, {target_z})")
+        
+        # Get initial position
+        obj_locs = self.get_obj_locations(agent_host)
+        if 'morgan' not in obj_locs:
+            print("[MOVE] Error: Cannot locate agent position")
+            return False
+            
+        _, curr_x, curr_z = obj_locs['morgan']
+        
+        # Calculate direction to target
+        dx = target_x - curr_x
+        dz = target_z - curr_z
+        angle_to_target = math.degrees(math.atan2(-dx, dz)) % 360
+        
+        # Face the target direction
+        agent_host.sendCommand(f"setYaw {angle_to_target}")
+        time.sleep(0.2)  # Wait for rotation
+        
+        # Move forward one block
+        agent_host.sendCommand("move 1")
+        agent_host.sendCommand("sprint 1")
+        time.sleep(0.5)  # Wait for movement
+        
+        # Stop movement
         agent_host.sendCommand("move 0")
         agent_host.sendCommand("sprint 0")
+        
+        return True
 
     def fetch_item(self, agent_host, item_to_pick):  
         if self.num_items_in_inv > inventory_limit:
+            print(f"[ACTION] Cannot fetch {item_to_pick}: Inventory full ({self.num_items_in_inv}/{inventory_limit})")
             return
-        # teleport
+            
+        print(f"[ACTION] Attempting to fetch: {item_to_pick}")
+        
+        # Get current and target positions
         obj_locs = self.get_obj_locations(agent_host)
+        if 'morgan' not in obj_locs or item_to_pick not in obj_locs:
+            print(f"[ERROR] Cannot locate Morgan or {item_to_pick}")
+            return
+            
         my_yaw, my_x, my_z = obj_locs['morgan']
         obj_yaw, obj_x, obj_z = obj_locs[item_to_pick]
-        self.teleport(agent_host, obj_x, obj_z)
-        # self.move_to(agent_host, obj_x, obj_z) TODO: a
-        time.sleep(0.1)  
+        
+        # Use A* pathfinding to move to the item
+        if hasattr(self, 'pathfinder'):
+            print(f"[PATH] Moving to {item_to_pick} using pathfinding")
+            # Convert positions to grid coordinates
+            start_pos = (int(round(my_x)), int(round(my_z)))
+            goal_pos = (int(round(obj_x)), int(round(obj_z)))
+            
+            # Update pathfinder's world state
+            self.pathfinder.update_world_state(agent_host)
+            
+            # Find and execute path
+            path = self.pathfinder.a_star(start_pos, goal_pos)
+            if path:
+                self.execute_path(agent_host, path)
+            else:
+                print(f"[PATH] No path found to {item_to_pick}, using direct movement")
+                self.move_to(agent_host, obj_x, obj_z)
+        else:
+            print(f"[PATH] Moving to {item_to_pick} using direct movement")
+            self.move_to(agent_host, obj_x, obj_z)
+            
+        # Wait for item pickup
         while True:
             if self.was_item_picked(agent_host, item_to_pick) or item_to_pick not in obj_locs:
                 break
-        self.teleport(agent_host, 0.5, 0.5)
-        time.sleep(0.1)  
+                
+        # Return to starting position using A*
+        if hasattr(self, 'pathfinder'):
+            print("[PATH] Returning to center")
+            start_pos = (int(round(obj_x)), int(round(obj_z)))
+            goal_pos = (0, 0)  # Return to center
+            path = self.pathfinder.a_star(start_pos, goal_pos)
+            if path:
+                self.execute_path(agent_host, path)
+            else:
+                print("[PATH] No path to center, using direct movement")
+                self.move_to(agent_host, 0.5, 0.5)
+        else:
+            self.move_to(agent_host, 0.5, 0.5)
 
         self.inventory[item_to_pick] += 1
         self.num_items_in_inv += 1
+        print(f"[SUCCESS] Added {item_to_pick} to inventory. Current items: {dict(self.inventory)}")
+        time.sleep(0.1)
 
     def get_block_position(self, agent_host, block_type, grid_name="floor_all", x_range=21, y_range=1, z_range=21, grid_min_x=-10, grid_min_z=-10, max_wait_seconds=5):
+        """Get absolute position of a specific block type in the grid"""
         start_time = time.time()
         while time.time() - start_time < max_wait_seconds:
             world_state = agent_host.getWorldState()
@@ -270,63 +313,98 @@ class Morgan(object):
                     obs = json.loads(world_state.observations[-1].text)
                     if grid_name in obs:
                         grid = obs[grid_name]
+                        
+                        # Search for matching blocks in the grid
                         for idx, block in enumerate(grid):
                             if block == block_type or block == f"lit_{block_type}":
-                                
+                                # Convert grid index to absolute world coordinates
+                                # Grid is ordered by x first, then z
                                 x_idx = idx % x_range
-                                z_idx = idx // z_range 
+                                z_idx = idx // x_range
                                 
+                                # Convert to absolute world coordinates
                                 world_x = grid_min_x + x_idx
                                 world_z = grid_min_z + z_idx
+                                
+                                print(f"[DEBUG] Found {block_type} at absolute coordinates ({world_x}, {world_z})")
                                 return world_x, world_z
+                                
                 except Exception as e:
-                    print("Error while parsing observation:", e)
+                    print(f"[ERROR] Error finding {block_type}:", e)
             time.sleep(0.1)
 
         print(f"[WARN] Could not find block '{block_type}' in grid '{grid_name}' within {max_wait_seconds} seconds")
         return None, None
 
-    def can_cook(self, agent_host, threshold=1.5):
+    def can_cook(self, agent_host, threshold=2):
         furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
         if furnace_x is None:
             return False
 
         obj_locs = self.get_obj_locations(agent_host)
         if 'morgan' not in obj_locs:
-            print("morgan false location")
             return False
 
         _, agent_x, agent_z = obj_locs['morgan']
-        distance = math.sqrt((furnace_x)**2 + (furnace_z)**2)
-        print(f"Distance furnace from agent: {distance}")
+        # distance = math.sqrt((furnace_x)**2 + (furnace_z)**2)
+        # print(f"Distance furnace from agent: {distance}")
+
+        distance = math.sqrt((furnace_x - agent_x)**2 + (furnace_z - agent_z)**2)
+        print(f"[DEBUG] Agent at ({agent_x:.1f}, {agent_z:.1f}), furnace at ({furnace_x}, {furnace_z}), distance: {distance:.1f}")
         return distance <= threshold
 
     def cook_item(self, agent_host, cooked_item):
-        if not self.can_cook(agent_host):
-            print("[INFO] Not close enough to a furnace. Moving...")
-            furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
-            print(f"furnace: {furnace_x}, {furnace_z}")
-            if furnace_x is not None:
-                self.move_to(agent_host, furnace_x, furnace_z)
-
+        print(f"\n[ACTION] Attempting to cook: {cooked_item}")
+        
+        # Check ingredients first
         if cooked_item not in submission.cooking_recipes:
-            print(f"[ERROR] No recipe for {cooked_item}.")
+            print(f"[ERROR] No recipe found for {cooked_item}")
             return
 
         ingredients = submission.cooking_recipes[cooked_item]
+        print(f"[INFO] Recipe requires: {ingredients}")
+        
+        # Verify ingredients
         for item in ingredients:
             if self.inventory[item] < ingredients.count(item):
-                print(f"[ERROR] Not enough {item} to cook {cooked_item}.")
+                print(f"[ERROR] Not enough {item} (have {self.inventory[item]}, need {ingredients.count(item)})")
                 return
+        print("[INFO] All ingredients available")
 
+        # Move to furnace if needed
+        if not self.can_cook(agent_host):
+            print("[PATH] Moving to furnace")
+            furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
+            if furnace_x is not None:
+                self.move_to(agent_host, furnace_x, furnace_z)
+                time.sleep(0.5)  # Wait for movement to complete
+                
+                # Check again if we're close enough
+                if not self.can_cook(agent_host):
+                    print("[ERROR] Failed to reach furnace")
+                    exit()
+                    return
+            else:
+                print("[ERROR] Could not find furnace")
+                return
+        
+        print("[ACTION] Starting cooking process")
+        # Send commands to cook the item
+        agent_host.sendCommand("use 1")  # Open furnace
+        time.sleep(0.5)  # Wait for furnace to open
+
+        # Remove ingredients and add cooked item
         for item in ingredients:
             self.inventory[item] -= 1
             self.num_items_in_inv -= 1
+            print(f"[INFO] Used 1x {item}")
 
         self.inventory[cooked_item] += 1
         self.num_items_in_inv += 1
-        print(f"[SUCCESS] Cooked {cooked_item}.")
-        time.sleep(0.5)
+        
+        agent_host.sendCommand("use 0")  # Close furnace
+        time.sleep(0.5)  # Wait for furnace to close
+        print(f"[SUCCESS] Cooked {cooked_item}. Current items: {dict(self.inventory)}")
 
     def can_craft(self, agent_host, threshold=1.5):
         table_x, table_z = self.get_block_position(agent_host, "crafting_table")
@@ -334,41 +412,82 @@ class Morgan(object):
             return False
         obj_locs = self.get_obj_locations(agent_host)
         if 'morgan' not in obj_locs:
-            print("morgan false location")
             return False
         _, agent_x, agent_z = obj_locs['morgan']
-        distance = math.sqrt((table_x)**2 + (table_z)**2)
-        print(f"Distance crafting table from agent: {distance}")
+        # Calculate distance from agent to crafting table center
+        distance = math.sqrt((table_x - agent_x)**2 + (table_z - agent_z)**2)
+        print(f"[DEBUG] Agent at ({agent_x:.1f}, {agent_z:.1f}), crafting table at ({table_x}, {table_z}), distance: {distance:.1f}")
         return distance <= threshold
 
     def craft_item(self, agent_host, item):
-        if not self.can_craft(agent_host):
-            print("[INFO] Not close enough to a crafting table. Moving...")
-            table_x, table_z = self.get_block_position(agent_host, "crafting_table")
-            print(f"crafting_table: {table_x}, {table_z}")
-            if table_x is not None:
-                self.move_to(agent_host, table_x, table_z)
-
-
+        print(f"\n[ACTION] Attempting to craft: {item}")
+        
+        # Check recipe first
         if item not in submission.food_recipes:
-            print(f"[ERROR] No recipe for {item}.")
+            print(f"[ERROR] No recipe found for {item}")
             return
 
         ingredients = submission.food_recipes[item]
+        print(f"[INFO] Recipe requires: {ingredients}")
+        
+        # Verify ingredients
         for item_needed in ingredients:
             if self.inventory[item_needed] < ingredients.count(item_needed):
-                print(f"[ERROR] Not enough {item_needed} to craft {item}.")
+                print(f"[ERROR] Not enough {item_needed} (have {self.inventory[item_needed]}, need {ingredients.count(item_needed)})")
+                return
+        print("[INFO] All ingredients available")
+
+        # Move to crafting table if needed
+        if not self.can_craft(agent_host):
+            print("[PATH] Moving to crafting table")
+            table_x, table_z = self.get_block_position(agent_host, "crafting_table")
+            if table_x is not None:
+                self.move_to(agent_host, table_x, table_z)
+                time.sleep(0.5)  # Wait for movement to complete
+                
+                # Check again if we're close enough
+                if not self.can_craft(agent_host):
+                    print("[ERROR] Failed to reach crafting table")
+                    return
+            else:
+                print("[ERROR] Could not find crafting table")
                 return
 
+        print("[ACTION] Starting crafting process")
+        # Remove ingredients
         for item_needed in ingredients:
             self.inventory[item_needed] -= 1
             self.num_items_in_inv -= 1
+            print(f"[INFO] Used 1x {item_needed}")
 
+        # Craft the item
         agent_host.sendCommand(f'craft {item}')
         self.inventory[item] += 1
         self.num_items_in_inv += 1
-        print(f"[SUCCESS] Crafted {item}.")
         time.sleep(0.25)
+        print(f"[SUCCESS] Crafted {item}. Current items: {dict(self.inventory)}")
+
+    def execute_path(self, agent_host, path):
+        """Execute a path by moving through each waypoint"""
+        if not path or len(path) < 2:
+            print("[PATH] Path too short to execute")
+            return False
+            
+        # print(f"[PATH] Executing path with {len(path)} waypoints")
+        
+        # Move through each waypoint in the path
+        for i, (target_x, target_z) in enumerate(path[1:], 1):
+            # print(f"[PATH] Moving to waypoint {i}/{len(path)-1}: ({target_x}, {target_z})")
+            
+            # Add a small offset to help the agent reach the center of cells
+            adjusted_x = target_x + 0.5
+            adjusted_z = target_z + 0.5
+            
+            self.move_to(agent_host, adjusted_x, adjusted_z)
+            time.sleep(0.1)  # Small delay between moves
+        
+        print("[PATH] Path execution completed")
+        return True
 
     def present_gift(self, agent_host):
         """Calculates the reward points for the current inventory.
@@ -380,13 +499,16 @@ class Morgan(object):
             reward:     <float> current reward from world state
         """
         current_r = 0
-        #time.sleep(0.1)
-
+        
+        print("\nPresenting items:")
         for item, counts in self.inventory.items():
-            current_r += rewards_map[item] * counts
+            if counts > 0:  # Only show items that are actually in inventory
+                item_reward = rewards_map[item] * counts
+                current_r += item_reward
+                print(f"  {counts}x {item:<15} -> {item_reward:>4} points")
+        print(f"Total reward: {current_r}")
 
         agent_host.sendCommand('quit')
-        #time.sleep(0.25)
         return current_r
 
     @staticmethod
@@ -450,7 +572,7 @@ class Morgan(object):
             # random legal action
             action_idx = random.choice(legal_indices)
         else:
-            # mask illegal actions to −∞ so they’re never chosen
+            # mask illegal actions to −∞ so they're never chosen
             for idx in illegal_indices:
                 q_values_all[idx] = float("-inf")
             action_idx = torch.argmax(q_values_all).item()
@@ -489,7 +611,6 @@ class Morgan(object):
             world_state = agent_host.getWorldState()
             if world_state.number_of_observations_since_last_state > 0:
                 try:
-                    print(world_state.observations[-1])
                     obs = json.loads(world_state.observations[-1].text)
                     if 'floor_all' in obs:
                         grid = obs['floor_all']
@@ -512,30 +633,17 @@ class Morgan(object):
 
                                 return x_pos + dx, z_pos + dz
                 except Exception as e:
-                    print("Error parsing observation:", e)
+                    pass
             time.sleep(0.1)
-
-        print(f"[WARN] Could not find block type '{block_type}' within {max_wait_seconds}s")
         return None, None
 
     def act(self, agent_host, action):
-        print(action + ",", end=" ")
+        print(f"\n[STEP] Executing action: {action}")
         if action == 'present_gift':
             return self.present_gift(agent_host)
         elif action.startswith('c_'):
-            # x, z = self.find_block_position(agent_host, "crafting_table")
-            # if x is not None:
-            #     self.move_to(agent_host, x, z)
-
-            # print("moving manually")
-            # self.move_to(agent_host, 5, 5) #TODO: a.
             self.craft_item(agent_host, action[2:])
         elif action.startswith('cook_'):
-            # x, z = self.find_block_position(agent_host, "furnace")
-            # if x is not None:
-            #     self.move_to(agent_host, x, z)
-
-            # self.move_to(agent_host, -5, -5) #TODO: a.
             self.cook_item(agent_host, action[len('cook_'):])
         else:
             self.fetch_item(agent_host, action)
@@ -595,10 +703,11 @@ class Morgan(object):
     def run(self, agent_host):
         if not self.use_dqn:
             # Fallback to original tabular run
-            # (copy‐paste the old code here)
             S, A, R = deque(), deque(), deque()
             present_reward = 0
             done_update = False
+            total_reward = 0.0  # Track total reward for the episode
+            
             while not done_update:
                 s0 = self.get_curr_state()
                 possible_actions = self.get_possible_actions(agent_host, True)
@@ -613,13 +722,13 @@ class Morgan(object):
                     if t < T:
                         current_r = self.act(agent_host, A[-1])
                         R.append(current_r)
+                        total_reward += current_r  # Accumulate reward
 
                         if A[-1] == "present_gift":
                             # Terminating state
                             T = t + 1
                             S.append('Term State')
                             present_reward = current_r
-                            print("Reward:", present_reward)
                         else:
                             s = self.get_curr_state()
                             S.append(s)
