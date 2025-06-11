@@ -210,37 +210,48 @@ class Morgan(object):
                     good_frame = True
                     end_frame = timer()
 
-    def move_to(self, agent_host, target_x, target_z):
-        """Move to a target position one block at a time"""
-        # print(f"[MOVE] Starting movement to ({target_x}, {target_z})")
+    def move_to(self, agent_host, target_x, target_z, timeout=30):
+        """Move to absolute target coordinates"""
+        start_time = time.time()
         
-        # Get initial position
-        obj_locs = self.get_obj_locations(agent_host)
-        if 'morgan' not in obj_locs:
-            print("[MOVE] Error: Cannot locate agent position")
-            return False
+        while time.time() - start_time < timeout:
+            # Get current position
+            obj_locs = self.get_obj_locations(agent_host)
+            if 'morgan' not in obj_locs:
+                return False
             
-        _, curr_x, curr_z = obj_locs['morgan']
+            _, curr_x, curr_z = obj_locs['morgan']
+            
+            # Calculate distance to target
+            distance = math.sqrt((target_x - curr_x)**2 + (target_z - curr_z)**2)
+            
+            # If we're close enough, stop
+            if distance < 0.5:
+                agent_host.sendCommand("move 0")
+                agent_host.sendCommand("sprint 0")
+                print(f"[MOVE] Reached target. Final distance: {distance:.2f}")
+                return True
+            
+            # Calculate direction to target
+            dx = target_x - curr_x
+            dz = target_z - curr_z
+            angle_to_target = math.degrees(math.atan2(-dx, dz)) % 360
+            
+            # Face the target direction
+            agent_host.sendCommand(f"setYaw {angle_to_target}")
+            
+            # Move forward
+            agent_host.sendCommand("move 1")
+            agent_host.sendCommand("sprint 1")
+            
+            # Small delay to allow movement
+            time.sleep(0.1)
         
-        # Calculate direction to target
-        dx = target_x - curr_x
-        dz = target_z - curr_z
-        angle_to_target = math.degrees(math.atan2(-dx, dz)) % 360
-        
-        # Face the target direction
-        agent_host.sendCommand(f"setYaw {angle_to_target}")
-        time.sleep(0.2)  # Wait for rotation
-        
-        # Move forward one block
-        agent_host.sendCommand("move 1")
-        agent_host.sendCommand("sprint 1")
-        time.sleep(0.5)  # Wait for movement
-        
-        # Stop movement
+        # If we get here, we timed out
         agent_host.sendCommand("move 0")
         agent_host.sendCommand("sprint 0")
-        
-        return True
+        print("[MOVE] Timed out before reaching target")
+        return False
 
     def fetch_item(self, agent_host, item_to_pick):  
         if self.num_items_in_inv > inventory_limit:
@@ -346,12 +357,23 @@ class Morgan(object):
             return False
 
         _, agent_x, agent_z = obj_locs['morgan']
-        # distance = math.sqrt((furnace_x)**2 + (furnace_z)**2)
-        # print(f"Distance furnace from agent: {distance}")
-
         distance = math.sqrt((furnace_x - agent_x)**2 + (furnace_z - agent_z)**2)
-        print(f"[DEBUG] Agent at ({agent_x:.1f}, {agent_z:.1f}), furnace at ({furnace_x}, {furnace_z}), distance: {distance:.1f}")
-        return distance <= threshold
+        print(f"[DEBUG] Agent at absolute ({agent_x:.1f}, {agent_z:.1f}), furnace at absolute ({furnace_x}, {furnace_z}), distance: {distance:.1f}")
+        
+        # If we're not close enough, try to approach
+        if distance > threshold:
+            print("[DEBUG] Not close enough to furnace, attempting approach")
+            if self.approach_furnace(agent_host):
+                # Recheck distance after approach
+                obj_locs = self.get_obj_locations(agent_host)
+                if 'morgan' in obj_locs:
+                    _, agent_x, agent_z = obj_locs['morgan']
+                    distance = math.sqrt((furnace_x - agent_x)**2 + (furnace_z - agent_z)**2)
+                    print(f"[DEBUG] After approach: distance = {distance:.1f}")
+                    return distance <= threshold
+            return False
+            
+        return True
 
     def cook_item(self, agent_host, cooked_item):
         print(f"\n[ACTION] Attempting to cook: {cooked_item}")
@@ -359,7 +381,7 @@ class Morgan(object):
         # Check ingredients first
         if cooked_item not in submission.cooking_recipes:
             print(f"[ERROR] No recipe found for {cooked_item}")
-            return
+            return False
 
         ingredients = submission.cooking_recipes[cooked_item]
         print(f"[INFO] Recipe requires: {ingredients}")
@@ -368,7 +390,7 @@ class Morgan(object):
         for item in ingredients:
             if self.inventory[item] < ingredients.count(item):
                 print(f"[ERROR] Not enough {item} (have {self.inventory[item]}, need {ingredients.count(item)})")
-                return
+                return False
         print("[INFO] All ingredients available")
 
         # Move to furnace if needed
@@ -382,29 +404,34 @@ class Morgan(object):
                 # Check again if we're close enough
                 if not self.can_cook(agent_host):
                     print("[ERROR] Failed to reach furnace")
-                    exit()
-                    return
+                    return False
             else:
                 print("[ERROR] Could not find furnace")
-                return
+                return False
         
-        print("[ACTION] Starting cooking process")
-        # Send commands to cook the item
-        agent_host.sendCommand("use 1")  # Open furnace
-        time.sleep(0.5)  # Wait for furnace to open
-
-        # Remove ingredients and add cooked item
-        for item in ingredients:
-            self.inventory[item] -= 1
-            self.num_items_in_inv -= 1
-            print(f"[INFO] Used 1x {item}")
-
-        self.inventory[cooked_item] += 1
-        self.num_items_in_inv += 1
+        print("[ACTION] Exchanging items")
+        print(f"[INFO] Item: {cooked_item}")
         
-        agent_host.sendCommand("use 0")  # Close furnace
-        time.sleep(0.5)  # Wait for furnace to close
-        print(f"[SUCCESS] Cooked {cooked_item}. Current items: {dict(self.inventory)}")
+        # Perform the cooking operation
+        try:
+            # Combine the ingredients to cook
+            agent_host.sendCommand(f"craft {cooked_item}")
+            time.sleep(0.1)  # Small delay to allow crafting
+            
+            # Update our inventory tracking
+            for item in ingredients:
+                self.inventory[item] -= 1
+                self.num_items_in_inv -= 1
+                print(f"[INFO] Used 1x {item}")
+
+            self.inventory[cooked_item] += 1
+            self.num_items_in_inv += 1
+            print(f"[SUCCESS] Cooked {cooked_item}. Current items: {dict(self.inventory)}")
+            return True
+            
+        except RuntimeError as e:
+            print(f"[ERROR] Failed to cook {cooked_item}: {e}")
+            return False
 
     def can_craft(self, agent_host, threshold=1.5):
         table_x, table_z = self.get_block_position(agent_host, "crafting_table")
@@ -416,8 +443,22 @@ class Morgan(object):
         _, agent_x, agent_z = obj_locs['morgan']
         # Calculate distance from agent to crafting table center
         distance = math.sqrt((table_x - agent_x)**2 + (table_z - agent_z)**2)
-        print(f"[DEBUG] Agent at ({agent_x:.1f}, {agent_z:.1f}), crafting table at ({table_x}, {table_z}), distance: {distance:.1f}")
-        return distance <= threshold
+        print(f"[DEBUG] Agent at absolute ({agent_x:.1f}, {agent_z:.1f}), crafting table at absolute ({table_x}, {table_z}), distance: {distance:.1f}")
+        
+        # If we're not close enough, try to approach
+        if distance > threshold:
+            print("[DEBUG] Not close enough to crafting table, attempting approach")
+            if self.approach_crafting_table(agent_host):
+                # Recheck distance after approach
+                obj_locs = self.get_obj_locations(agent_host)
+                if 'morgan' in obj_locs:
+                    _, agent_x, agent_z = obj_locs['morgan']
+                    distance = math.sqrt((table_x - agent_x)**2 + (table_z - agent_z)**2)
+                    print(f"[DEBUG] After approach: distance = {distance:.1f}")
+                    return distance <= threshold
+            return False
+            
+        return True
 
     def craft_item(self, agent_host, item):
         print(f"\n[ACTION] Attempting to craft: {item}")
@@ -615,26 +656,26 @@ class Morgan(object):
                     if 'floor_all' in obs:
                         grid = obs['floor_all']
                         
-                        obj_locs = self.get_obj_locations(agent_host)
-                        _, x_pos, z_pos = obj_locs['morgan']
-
-                        x_len = 81  # -40 to 40
-                        y_len = 2   # 227 to 228
-                        z_len = 81
-
+                        # Search for matching blocks in the grid
                         for idx, block in enumerate(grid):
-                            if block in [block_type, f"lit_{block_type}"]:
-                                x_idx = idx % x_len
-                                y_idx = (idx // x_len) % y_len
-                                z_idx = idx // (x_len * y_len)
-
-                                dx = x_idx - 40
-                                dz = z_idx - 40
-
-                                return x_pos + dx, z_pos + dz
+                            if block == block_type or block == f"lit_{block_type}":
+                                # Convert grid index to absolute world coordinates
+                                # Grid is ordered by x first, then z
+                                x_idx = idx % 21  # Grid size is 21x21
+                                z_idx = idx // 21
+                                
+                                # Convert to absolute world coordinates
+                                world_x = -10 + x_idx  # Grid starts at -10
+                                world_z = -10 + z_idx
+                                
+                                print(f"[DEBUG] Found {block_type} at absolute coordinates ({world_x}, {world_z})")
+                                return world_x, world_z
+                                
                 except Exception as e:
-                    pass
+                    print(f"[ERROR] Error finding {block_type}:", e)
             time.sleep(0.1)
+
+        print(f"[WARN] Could not find block '{block_type}' in grid")
         return None, None
 
     def act(self, agent_host, action):
@@ -789,3 +830,91 @@ class Morgan(object):
         self.episode_counter = prev_count + 1
         if self.episode_counter % TARGET_UPDATE == 0:
             self.target_net.load_state_dict(self.policy_net.state_dict())
+
+    def approach_furnace(self, agent_host):
+        """Make a precise approach to the furnace using absolute coordinates"""
+        furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
+        if furnace_x is None:
+            print("[ERROR] Could not find furnace")
+            return False
+        
+        # Get current position
+        obj_locs = self.get_obj_locations(agent_host)
+        if 'morgan' not in obj_locs:
+            print("[ERROR] Cannot locate agent position")
+            return False
+        
+        _, curr_x, curr_z = obj_locs['morgan']
+        
+        # Calculate vector to furnace
+        dx = furnace_x - curr_x
+        dz = furnace_z - curr_z
+        distance = math.sqrt(dx*dx + dz*dz)
+        
+        # If we're already close enough, just face the furnace
+        if distance <= 2:
+            angle_to_furnace = math.degrees(math.atan2(-dx, dz)) % 360
+            agent_host.sendCommand(f"setYaw {angle_to_furnace}")
+            time.sleep(0.2)
+            return True
+        
+        # Calculate target position 1.5 blocks away from furnace
+        target_x = furnace_x - (dx * 1.5/distance)
+        target_z = furnace_z - (dz * 1.5/distance)
+        
+        # Move to target position
+        success = self.move_to(agent_host, target_x, target_z, timeout=5)
+        if not success:
+            print("[WARN] Failed to reach ideal furnace position")
+            return False
+        
+        # Face the furnace
+        angle_to_furnace = math.degrees(math.atan2(-(furnace_x - target_x), furnace_z - target_z)) % 360
+        agent_host.sendCommand(f"setYaw {angle_to_furnace}")
+        time.sleep(0.2)
+        
+        return True
+        
+    def approach_crafting_table(self, agent_host):
+        """Make a precise approach to the crafting table using absolute coordinates"""
+        table_x, table_z = self.get_block_position(agent_host, "crafting_table")
+        if table_x is None:
+            print("[ERROR] Could not find crafting table")
+            return False
+        
+        # Get current position
+        obj_locs = self.get_obj_locations(agent_host)
+        if 'morgan' not in obj_locs:
+            print("[ERROR] Cannot locate agent position")
+            return False
+        
+        _, curr_x, curr_z = obj_locs['morgan']
+        
+        # Calculate vector to crafting table
+        dx = table_x - curr_x
+        dz = table_z - curr_z
+        distance = math.sqrt(dx*dx + dz*dz)
+        
+        # If we're already close enough, just face the table
+        if distance <= 1.5:
+            angle_to_table = math.degrees(math.atan2(-dx, dz)) % 360
+            agent_host.sendCommand(f"setYaw {angle_to_table}")
+            time.sleep(0.2)
+            return True
+        
+        # Calculate target position 1 block away from table
+        target_x = table_x - (dx * 1.0/distance)
+        target_z = table_z - (dz * 1.0/distance)
+        
+        # Move to target position
+        success = self.move_to(agent_host, target_x, target_z, timeout=5)
+        if not success:
+            print("[WARN] Failed to reach ideal crafting table position")
+            return False
+        
+        # Face the table
+        angle_to_table = math.degrees(math.atan2(-(table_x - target_x), table_z - target_z)) % 360
+        agent_host.sendCommand(f"setYaw {angle_to_table}")
+        time.sleep(0.2)
+        
+        return True
