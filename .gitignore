@@ -40,3 +40,5 @@ temp/
 *.tmp
 *.bak
 *.swp
+Python_Examples/loss_data.csv
+Python_Examples/training_data.txt
