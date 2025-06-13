@@ -16,8 +16,8 @@ import random
 from collections import deque
 import numpy as np  
 
-
 from dqn_architecture import SimpleDQN, ReplayBuffer
+from a_star import MorganPathfinder
 
 BATCH_SIZE = 32
 TARGET_UPDATE = 10   # how often (in episodes) to copy policy_net → target_net
@@ -30,44 +30,55 @@ rewards_map = submission.rewards_map
 cooking_recipe = submission.cooking_recipes
 
 class Morgan(object):
-    def __init__(self, alpha=0.3, gamma=1, n=1, use_dqn=False):
-        """Constructing an RL agent.
-
-        Args
-            alpha:  <float>  learning rate      (default = 0.3)
-            gamma:  <float>  value decay rate   (default = 1)
-            n:      <int>    number of back steps to update (default = 1)
-        """
-        self.use_dqn = use_dqn
-        self.episode_rewards = []  # will store total reward per episode
-        self.loss_history    = []  # will store loss value per optimization step
-
-        # Initialize pathfinder
-        from a_star import MorganPathfinder
-        self.pathfinder = MorganPathfinder()
-
-        if not use_dqn:
-            # ───── Tabular Q‐learning branch (unchanged) ─────
-            self.epsilon = 0.2
-            self.q_table = {}
-            self.n, self.alpha, self.gamma = n, alpha, gamma
-            self.inventory = defaultdict(lambda: 0)
-            self.num_items_in_inv = 0
-            return
-
-        # ───── NEW DQN SETUP ─────
-        self.inventory = defaultdict(lambda: 0)
+    def __init__(self, n=1, use_dqn=False):
+        """Initialize Morgan with learning rate n and DQN flag."""
+        self.n = n  # Learning rate
+        self.use_dqn = use_dqn  # Whether to use DQN instead of tabular Q-learning
+        
+        # Initialize inventory tracking
+        self.inventory = {}
         self.num_items_in_inv = 0
-
-        # 1) Build a combined list of raw + cooked item‐names
-        # ── UPDATED ──
-        raw_items    = submission.items[:]                           
-        cooked_items = list(submission.cooking_recipes.keys())       # ←==== use keys(), not values()
-        # Union them (avoid duplicates):
-        self.item_list      = raw_items + [ci for ci in cooked_items if ci not in raw_items]
-        self.num_item_types = len(self.item_list)
-        # ──────────────────────────────────
-           # e.g. now = 6 or 7
+        
+        # Initialize exploration rate
+        self.eps = 1.0
+        self.eps_min = 0.01
+        self.eps_decay = 0.995
+        
+        # Initialize discount factor
+        self.gamma = 0.95
+        
+        # Initialize pathfinder
+        self.pathfinder = MorganPathfinder()
+        
+        # Use item lists from hunger_learner_helper
+        self.item_list = submission.items + list(submission.cooking_recipes.keys()) + list(submission.food_recipes.keys())
+        # Remove any duplicates while preserving order
+        self.item_list = list(dict.fromkeys(self.item_list))
+        
+        # Initialize Q-learning specific attributes
+        if not self.use_dqn:
+            self.q_table = {}
+            self.q_value_changes = []  # Track changes in Q-values
+            self.last_q_values = {}  # Store previous Q-values for comparison
+            self.reward_history = []  # Track rewards for standard deviation calculation
+            self.learning_rate_effects = []  # Track how learning rate affects performance
+        
+        # Initialize DQN if enabled
+        if self.use_dqn:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.policy_net = SimpleDQN(len(self.item_list), 128, len(self._build_all_actions_list())).to(self.device)
+            self.target_net = SimpleDQN(len(self.item_list), 128, len(self._build_all_actions_list())).to(self.device)
+            self.target_net.load_state_dict(self.policy_net.state_dict())
+            # Use a more appropriate learning rate for DQN
+            self.optimizer = optim.Adam(self.policy_net.parameters(), lr=0.001)  # Changed from 1.0 to 0.001
+            self.memory = ReplayBuffer(10000)
+            self.batch_size = 64
+            self.episode_rewards = []
+            self.loss_history = []
+            self.episode_counter = 0
+            self.TARGET_UPDATE = 10
+            self.steps_done = 0  # Initialize steps_done counter
+            self.criterion = nn.MSELoss()  # Initialize loss function
 
         self.inventory_limit = 3
         self.gamma           = 0.99
@@ -76,26 +87,11 @@ class Morgan(object):
         self.eps_decay       = 20000
         self.epsilon         = self.eps_start
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         # Build a fixed list of all possible actions (fetch, craft, cook, present_gift):
         self.all_actions = self._build_all_actions_list()
         self.num_actions = len(self.all_actions)
 
-        # Initialize policy_net and target_net
-        hidden_dim = 128
-        self.policy_net = SimpleDQN(self.num_item_types, hidden_dim, self.num_actions).to(self.device)
-        self.target_net = SimpleDQN(self.num_item_types, hidden_dim, self.num_actions).to(self.device)
-        self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.target_net.eval()
-
-        # Replay buffer + optimizer + loss
-        self.memory    = ReplayBuffer(capacity=10000)
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-3)
-        self.criterion = nn.MSELoss()
-        self.steps_done = 0
-        self.episode_counter = 0    # ←–– initialize so you can safely do self.episode_counter+1 in run()
-
+        self.target_counter = 0
 
     def _build_all_actions_list(self):
         actions = []
@@ -117,9 +113,9 @@ class Morgan(object):
         Convert a state_tuple like (('beef',1), ('cooked_porkchop',2), …)
         into a 1×num_item_types tensor of normalized counts.
         """
-        vec = torch.zeros(self.num_item_types, dtype=torch.float, device=self.device)
+        vec = torch.zeros(len(self.item_list), dtype=torch.float, device=self.device)
         for (item_name, count) in state_tuple:
-            idx = self.item_list.index(item_name)  # ←==== UPDATED
+            idx = self.item_list.index(item_name)
             vec[idx] = count / float(self.inventory_limit)
         return vec
 
@@ -229,7 +225,6 @@ class Morgan(object):
             if distance < 0.5:
                 agent_host.sendCommand("move 0")
                 agent_host.sendCommand("sprint 0")
-                print(f"[MOVE] Reached target. Final distance: {distance:.2f}")
                 return True
             
             # Calculate direction to target
@@ -250,7 +245,6 @@ class Morgan(object):
         # If we get here, we timed out
         agent_host.sendCommand("move 0")
         agent_host.sendCommand("sprint 0")
-        print("[MOVE] Timed out before reaching target")
         return False
 
     def fetch_item(self, agent_host, item_to_pick):  
@@ -269,45 +263,55 @@ class Morgan(object):
         my_yaw, my_x, my_z = obj_locs['morgan']
         obj_yaw, obj_x, obj_z = obj_locs[item_to_pick]
         
-        # Use A* pathfinding to move to the item
-        if hasattr(self, 'pathfinder'):
-            print(f"[PATH] Moving to {item_to_pick} using pathfinding")
-            # Convert positions to grid coordinates
-            start_pos = (int(round(my_x)), int(round(my_z)))
-            goal_pos = (int(round(obj_x)), int(round(obj_z)))
-            
-            # Update pathfinder's world state
-            self.pathfinder.update_world_state(agent_host)
-            
-            # Find and execute path
-            path = self.pathfinder.a_star(start_pos, goal_pos)
-            if path:
-                self.execute_path(agent_host, path)
-            else:
-                print(f"[PATH] No path found to {item_to_pick}, using direct movement")
-                self.move_to(agent_host, obj_x, obj_z)
-        else:
-            print(f"[PATH] Moving to {item_to_pick} using direct movement")
-            self.move_to(agent_host, obj_x, obj_z)
+        # # Use A* pathfinding to move to the item
+        # if hasattr(self, 'pathfinder'):
+        #     print(f"[PATH] Moving to {item_to_pick} using pathfinding")
+        #     # Convert positions to grid coordinates
+        #     start_pos = (int(round(my_x)), int(round(my_z)))
+        #     goal_pos = (int(round(obj_x)), int(round(obj_z)))
+        
+        #     # Update pathfinder's world state
+        #     self.pathfinder.update_world_state(agent_host)
+        
+        #     # Find and execute path
+        #     path = self.pathfinder.a_star(start_pos, goal_pos)
+        #     if path:
+        #         self.execute_path(agent_host, path)
+        #     else:
+        #         print(f"[PATH] No path found to {item_to_pick}, using direct movement")
+        #         self.move_to(agent_host, obj_x, obj_z)
+        # else:
+        #     print(f"[PATH] Moving to {item_to_pick} using direct movement")
+        #     self.move_to(agent_host, obj_x, obj_z)
+        
+        # Teleport directly to the item
+        print(f"[TELEPORT] Moving to {item_to_pick} at ({obj_x}, {obj_z})")
+        self.teleport(agent_host, obj_x, obj_z)
+        time.sleep(0.5)  # Wait for teleport to complete
             
         # Wait for item pickup
         while True:
             if self.was_item_picked(agent_host, item_to_pick) or item_to_pick not in obj_locs:
                 break
-                
-        # Return to starting position using A*
-        if hasattr(self, 'pathfinder'):
-            print("[PATH] Returning to center")
-            start_pos = (int(round(obj_x)), int(round(obj_z)))
-            goal_pos = (0, 0)  # Return to center
-            path = self.pathfinder.a_star(start_pos, goal_pos)
-            if path:
-                self.execute_path(agent_host, path)
-            else:
-                print("[PATH] No path to center, using direct movement")
-                self.move_to(agent_host, 0.5, 0.5)
-        else:
-            self.move_to(agent_host, 0.5, 0.5)
+            
+        # # Return to starting position using A*
+        # if hasattr(self, 'pathfinder'):
+        #     print("[PATH] Returning to center")
+        #     start_pos = (int(round(obj_x)), int(round(obj_z)))
+        #     goal_pos = (0, 0)  # Return to center
+        #     path = self.pathfinder.a_star(start_pos, goal_pos)
+        #     if path:
+        #         self.execute_path(agent_host, path)
+        #     else:
+        #         print("[PATH] No path to center, using direct movement")
+        #         self.move_to(agent_host, 0.5, 0.5)
+        # else:
+        #     self.move_to(agent_host, 0.5, 0.5)
+        
+        # Teleport back to center
+        print("[TELEPORT] Returning to center")
+        self.teleport(agent_host, 0.5, 0.5)
+        time.sleep(0.5)  # Wait for teleport to complete
 
         self.inventory[item_to_pick] += 1
         self.num_items_in_inv += 1
@@ -337,7 +341,7 @@ class Morgan(object):
                                 world_x = grid_min_x + x_idx
                                 world_z = grid_min_z + z_idx
                                 
-                                print(f"[DEBUG] Found {block_type} at absolute coordinates ({world_x}, {world_z})")
+                                # print(f"[DEBUG] Found {block_type} at absolute coordinates ({world_x}, {world_z})")
                                 return world_x, world_z
                                 
                 except Exception as e:
@@ -358,80 +362,60 @@ class Morgan(object):
 
         _, agent_x, agent_z = obj_locs['morgan']
         distance = math.sqrt((furnace_x - agent_x)**2 + (furnace_z - agent_z)**2)
-        print(f"[DEBUG] Agent at absolute ({agent_x:.1f}, {agent_z:.1f}), furnace at absolute ({furnace_x}, {furnace_z}), distance: {distance:.1f}")
+        # print(f"[DEBUG] Agent at absolute ({agent_x:.1f}, {agent_z:.1f}), furnace at absolute ({furnace_x}, {furnace_z}), distance: {distance:.1f}")
         
         # If we're not close enough, try to approach
         if distance > threshold:
-            print("[DEBUG] Not close enough to furnace, attempting approach")
+            # print("[DEBUG] Not close enough to furnace, attempting approach")
             if self.approach_furnace(agent_host):
                 # Recheck distance after approach
                 obj_locs = self.get_obj_locations(agent_host)
                 if 'morgan' in obj_locs:
                     _, agent_x, agent_z = obj_locs['morgan']
                     distance = math.sqrt((furnace_x - agent_x)**2 + (furnace_z - agent_z)**2)
-                    print(f"[DEBUG] After approach: distance = {distance:.1f}")
+                    # print(f"[DEBUG] After approach: distance = {distance:.1f}")
                     return distance <= threshold
             return False
             
         return True
 
-    def cook_item(self, agent_host, cooked_item):
-        print(f"\n[ACTION] Attempting to cook: {cooked_item}")
+    def cook_item(self, agent_host, item):
+        print(f"\n[ACTION] Attempting to cook: {item}")
         
-        # Check ingredients first
-        if cooked_item not in submission.cooking_recipes:
-            print(f"[ERROR] No recipe found for {cooked_item}")
+        # Check recipe first
+        if item not in submission.cooking_recipes:
+            print(f"[ERROR] No recipe found for {item}")
             return False
 
-        ingredients = submission.cooking_recipes[cooked_item]
+        ingredients = submission.cooking_recipes[item]
         print(f"[INFO] Recipe requires: {ingredients}")
         
         # Verify ingredients
-        for item in ingredients:
-            if self.inventory[item] < ingredients.count(item):
-                print(f"[ERROR] Not enough {item} (have {self.inventory[item]}, need {ingredients.count(item)})")
+        for item_needed in ingredients:
+            if self.inventory.get(item_needed, 0) < ingredients.count(item_needed):
+                print(f"[ERROR] Not enough {item_needed} (have {self.inventory.get(item_needed, 0)}, need {ingredients.count(item_needed)})")
                 return False
         print("[INFO] All ingredients available")
-
-        # Move to furnace if needed
-        if not self.can_cook(agent_host):
-            print("[PATH] Moving to furnace")
-            furnace_x, furnace_z = self.get_block_position(agent_host, "furnace")
-            if furnace_x is not None:
-                self.move_to(agent_host, furnace_x, furnace_z)
-                time.sleep(0.5)  # Wait for movement to complete
-                
-                # Check again if we're close enough
-                if not self.can_cook(agent_host):
-                    print("[ERROR] Failed to reach furnace")
-                    return False
-            else:
-                print("[ERROR] Could not find furnace")
-                return False
         
-        print("[ACTION] Exchanging items")
-        print(f"[INFO] Item: {cooked_item}")
-        
-        # Perform the cooking operation
-        try:
-            # Combine the ingredients to cook
-            agent_host.sendCommand(f"craft {cooked_item}")
-            time.sleep(0.1)  # Small delay to allow crafting
-            
-            # Update our inventory tracking
-            for item in ingredients:
-                self.inventory[item] -= 1
-                self.num_items_in_inv -= 1
-                print(f"[INFO] Used 1x {item}")
+        # Teleport to furnace
+        print("[TELEPORT] Moving to furnace")
+        self.teleport(agent_host, 1.5, 0.5)
+        time.sleep(0.5)  # Wait for teleport to complete
 
-            self.inventory[cooked_item] += 1
-            self.num_items_in_inv += 1
-            print(f"[SUCCESS] Cooked {cooked_item}. Current items: {dict(self.inventory)}")
-            return True
-            
-        except RuntimeError as e:
-            print(f"[ERROR] Failed to cook {cooked_item}: {e}")
-            return False
+        print("[ACTION] Starting cooking process")
+        # Remove ingredients
+        for item_needed in ingredients:
+            self.inventory[item_needed] -= 1
+            if self.inventory[item_needed] == 0:
+                del self.inventory[item_needed]
+            print(f"[INFO] Used 1x {item_needed}")
+        
+        # Cook the item
+        agent_host.sendCommand(f'cook {item}')
+        self.inventory[item] = self.inventory.get(item, 0) + 1
+        time.sleep(0.25)
+        print(f"[SUCCESS] Cooked {item}. Current items: {dict(self.inventory)}")
+        return True
 
     def can_craft(self, agent_host, threshold=1.5):
         table_x, table_z = self.get_block_position(agent_host, "crafting_table")
@@ -443,70 +427,49 @@ class Morgan(object):
         _, agent_x, agent_z = obj_locs['morgan']
         # Calculate distance from agent to crafting table center
         distance = math.sqrt((table_x - agent_x)**2 + (table_z - agent_z)**2)
-        print(f"[DEBUG] Agent at absolute ({agent_x:.1f}, {agent_z:.1f}), crafting table at absolute ({table_x}, {table_z}), distance: {distance:.1f}")
+        # print(f"[DEBUG] Agent at absolute ({agent_x:.1f}, {agent_z:.1f}), crafting table at absolute ({table_x}, {table_z}), distance: {distance:.1f}")
         
         # If we're not close enough, try to approach
         if distance > threshold:
-            print("[DEBUG] Not close enough to crafting table, attempting approach")
+            # print("[DEBUG] Not close enough to crafting table, attempting approach")
             if self.approach_crafting_table(agent_host):
                 # Recheck distance after approach
                 obj_locs = self.get_obj_locations(agent_host)
                 if 'morgan' in obj_locs:
                     _, agent_x, agent_z = obj_locs['morgan']
                     distance = math.sqrt((table_x - agent_x)**2 + (table_z - agent_z)**2)
-                    print(f"[DEBUG] After approach: distance = {distance:.1f}")
+                    # print(f"[DEBUG] After approach: distance = {distance:.1f}")
                     return distance <= threshold
             return False
             
         return True
 
-    def craft_item(self, agent_host, item):
-        print(f"\n[ACTION] Attempting to craft: {item}")
+    def craft_item(self, agent_host, item_name):
+        """Craft an item using the crafting table."""
+        if not self.can_craft(agent_host):
+            print("[INFO] Not close enough to a crafting table. Using A* pathfinding...")
+            self.pathfinder.smart_move_to_crafting_table(agent_host)
         
-        # Check recipe first
-        if item not in submission.food_recipes:
-            print(f"[ERROR] No recipe found for {item}")
+        # Continue with original crafting logic
+        if item_name not in submission.food_recipes:
+            print(f"[ERROR] No recipe for {item_name}.")
             return
 
-        ingredients = submission.food_recipes[item]
-        print(f"[INFO] Recipe requires: {ingredients}")
-        
-        # Verify ingredients
+        ingredients = submission.food_recipes[item_name]
         for item_needed in ingredients:
             if self.inventory[item_needed] < ingredients.count(item_needed):
-                print(f"[ERROR] Not enough {item_needed} (have {self.inventory[item_needed]}, need {ingredients.count(item_needed)})")
-                return
-        print("[INFO] All ingredients available")
-
-        # Move to crafting table if needed
-        if not self.can_craft(agent_host):
-            print("[PATH] Moving to crafting table")
-            table_x, table_z = self.get_block_position(agent_host, "crafting_table")
-            if table_x is not None:
-                self.move_to(agent_host, table_x, table_z)
-                time.sleep(0.5)  # Wait for movement to complete
-                
-                # Check again if we're close enough
-                if not self.can_craft(agent_host):
-                    print("[ERROR] Failed to reach crafting table")
-                    return
-            else:
-                print("[ERROR] Could not find crafting table")
+                print(f"[ERROR] Not enough {item_needed} to craft {item_name}.")
                 return
 
-        print("[ACTION] Starting crafting process")
-        # Remove ingredients
         for item_needed in ingredients:
             self.inventory[item_needed] -= 1
             self.num_items_in_inv -= 1
-            print(f"[INFO] Used 1x {item_needed}")
 
-        # Craft the item
-        agent_host.sendCommand(f'craft {item}')
-        self.inventory[item] += 1
+        agent_host.sendCommand(f'craft {item_name}')
+        self.inventory[item_name] += 1
         self.num_items_in_inv += 1
+        print(f"[SUCCESS] Crafted {item_name}.")
         time.sleep(0.25)
-        print(f"[SUCCESS] Crafted {item}. Current items: {dict(self.inventory)}")
 
     def execute_path(self, agent_host, path):
         """Execute a path by moving through each waypoint"""
@@ -598,7 +561,9 @@ class Morgan(object):
         # ----- DQN ε-greedy policy -----
         state_tensor = self.state_to_tensor(curr_state).unsqueeze(0)   # shape: (1, num_item_types)
         sample = random.random()
-        eps_threshold = self.eps_end + (self.eps_start - self.eps_end) * \
+        
+        # Calculate and update epsilon
+        self.epsilon = self.eps_end + (self.eps_start - self.eps_end) * \
                         math.exp(-1. * self.steps_done / self.eps_decay)
         self.steps_done += 1
 
@@ -609,7 +574,7 @@ class Morgan(object):
         legal_indices = [self.all_actions.index(a) for a in possible_actions]
         illegal_indices = list(set(range(self.num_actions)) - set(legal_indices))
 
-        if sample < eps_threshold:
+        if sample < self.epsilon:
             # random legal action
             action_idx = random.choice(legal_indices)
         else:
@@ -627,24 +592,38 @@ class Morgan(object):
 
         transitions = self.memory.sample(BATCH_SIZE)
         batch = list(zip(*transitions))
-        state_batch      = torch.stack([self.state_to_tensor(s)  for s  in batch[0]]).to(self.device)
-        action_batch     = torch.tensor(batch[1], dtype=torch.long, device=self.device)
-        reward_batch     = torch.tensor(batch[2], dtype=torch.float, device=self.device)
+        
+        # Convert to tensors and normalize state values
+        state_batch = torch.stack([self.state_to_tensor(s) for s in batch[0]]).to(self.device)
+        action_batch = torch.tensor(batch[1], dtype=torch.long, device=self.device)
+        reward_batch = torch.tensor(batch[2], dtype=torch.float, device=self.device)
         next_state_batch = torch.stack([self.state_to_tensor(s2) for s2 in batch[3]]).to(self.device)
-        done_batch       = torch.tensor(batch[4], dtype=torch.float, device=self.device)
+        done_batch = torch.tensor(batch[4], dtype=torch.float, device=self.device)
 
-        q_values = self.policy_net(state_batch).gather(1, action_batch.unsqueeze(1)).squeeze(1)
-
+        # Normalize rewards to help with training stability
+        reward_batch = reward_batch / 10.0  # Since our rewards are in range [-2, 8]
+        
+        # Current Q values
+        current_q_values = self.policy_net(state_batch)
+        current_q_values = current_q_values.gather(1, action_batch.unsqueeze(1)).squeeze(1)
+        
+        # Compute target Q values
         with torch.no_grad():
-            next_q_values = self.target_net(next_state_batch).max(dim=1)[0]
-            target_q      = reward_batch + (self.gamma * next_q_values * (1 - done_batch))
-
-        loss = self.criterion(q_values, target_q)
+            next_q_values = self.target_net(next_state_batch)
+            next_q_values = next_q_values.max(1)[0]
+            target_q_values = reward_batch + (self.gamma * next_q_values * (1 - done_batch))
+        
+        # Compute loss and update
+        loss = self.criterion(current_q_values, target_q_values)
+        
+        # Clip gradients to prevent exploding gradients
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), max_norm=1.0)
+        
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        return loss
+        return loss.item()  # Return scalar loss value
 
     def find_block_position(self, agent_host, block_type, max_wait_seconds=5):
         start_time = time.time()
@@ -668,7 +647,7 @@ class Morgan(object):
                                 world_x = -10 + x_idx  # Grid starts at -10
                                 world_z = -10 + z_idx
                                 
-                                print(f"[DEBUG] Found {block_type} at absolute coordinates ({world_x}, {world_z})")
+                                # print(f"[DEBUG] Found {block_type} at absolute coordinates ({world_x}, {world_z})")
                                 return world_x, world_z
                                 
                 except Exception as e:
@@ -787,11 +766,13 @@ class Morgan(object):
                             self.update_q_table(tau, S, A, R, T)
                         done_update = True
                         break
-            return
+            return submission.is_solution(present_reward)
 
         # --- New DQN training loop ---
         state = self.get_curr_state()
         total_reward = 0.0
+        episode_losses = []  # Track losses for this episode
+        final_reward = 0.0  # Track the final reward
 
         for t in range(MAX_STEPS_PER_EPISODE):
             possible_actions = self.get_possible_actions(agent_host, is_first_action=(t == 0))
@@ -801,31 +782,35 @@ class Morgan(object):
 
             next_state = self.get_curr_state()
             done = (action_str == "present_gift")
+            if done:
+                final_reward = reward
 
             self.memory.push(state, action_idx, reward, next_state, done)
             state = next_state
 
             loss = self.optimize_model()
             if loss is not None:
-                self.loss_history.append(loss.item())
+                episode_losses.append(loss)
+                self.loss_history.append(loss)
 
             if done:
                 break
 
-        # ←–– Episode has ended here ––→
-
-        # 1) Record total_reward
+        # Calculate average loss for this episode
+        avg_loss = np.mean(episode_losses) if episode_losses else 0.0
+        
+        # Record total_reward
         self.episode_rewards.append(total_reward)
 
-        # 2) Print a per‐episode summary:
+        # Print episode summary with safe loss calculation
         print(
             f"Episode {self.episode_counter+1:4d} | "
             f"TotalReward: {total_reward:.1f} | "
             f"Epsilon: {self.epsilon:.3f} | "
-            f"RecentAvgLoss: {np.mean(self.loss_history[-10:]):.4f}"
+            f"EpisodeAvgLoss: {avg_loss:.4f}"
         )
 
-        # 3) Update target network every TARGET_UPDATE episodes:
+        # Update target network every TARGET_UPDATE episodes
         prev_count = getattr(self, "episode_counter", 0)
         self.episode_counter = prev_count + 1
         if self.episode_counter % TARGET_UPDATE == 0:
@@ -918,3 +903,109 @@ class Morgan(object):
         time.sleep(0.2)
         
         return True
+
+    def calculate_std_dev(self, values, window_size=100):
+        """Calculate standard deviation of recent values"""
+        if not values:
+            return 0
+        recent_values = values[-window_size:] if len(values) > window_size else values
+        mean = sum(recent_values) / len(recent_values)
+        squared_diff_sum = sum((x - mean) ** 2 for x in recent_values)
+        return math.sqrt(squared_diff_sum / len(recent_values))
+
+    def get_q_learning_metrics(self):
+        """Get comprehensive metrics for Q-learning"""
+        if not self.use_dqn:
+            metrics = {
+                'avg_q_change': self.get_average_q_change(),
+                'recent_changes': self.get_recent_q_changes(30),
+                'q_change_std_dev': self.calculate_std_dev(self.q_value_changes, window_size=30),
+                'reward_std_dev': self.calculate_std_dev(self.reward_history, window_size=30),
+                'recent_rewards': self.reward_history[-30:] if len(self.reward_history) >= 30 else self.reward_history
+            }
+            return metrics
+        return None
+
+    def get_dqn_metrics(self):
+        """Get comprehensive metrics for DQN"""
+        if self.use_dqn:
+            metrics = {
+                'avg_recent_reward': sum(self.episode_rewards[-30:]) / min(30, len(self.episode_rewards)) if self.episode_rewards else 0,
+                'reward_std_dev': self.calculate_std_dev(self.episode_rewards, window_size=30),
+                'avg_recent_loss': sum(self.loss_history[-30:]) / min(30, len(self.loss_history)) if self.loss_history else 0,
+                'loss_std_dev': self.calculate_std_dev(self.loss_history, window_size=30),
+                'recent_rewards': self.episode_rewards[-30:] if len(self.episode_rewards) >= 30 else self.episode_rewards,
+                'recent_losses': self.loss_history[-30:] if len(self.loss_history) >= 30 else self.loss_history
+            }
+            return metrics
+        return None
+
+    def update_q_value(self, state, action, new_value):
+        """Update Q-value and track the change for tabular Q-learning"""
+        if not self.use_dqn:
+            # Store old value if it exists
+            old_value = self.q_table.get(state, {}).get(action, 0)
+            
+            # Update Q-value
+            if state not in self.q_table:
+                self.q_table[state] = {}
+            self.q_table[state][action] = new_value
+            
+            # Calculate and store the change
+            change = abs(new_value - old_value)
+            self.q_value_changes.append(change)
+            
+            # Track learning rate effect
+            if old_value != 0:  # Only track when we have a previous value
+                relative_change = change / abs(old_value) if old_value != 0 else 0
+                self.learning_rate_effects.append({
+                    'learning_rate': self.n,
+                    'relative_change': relative_change,
+                    'absolute_change': change
+                })
+            
+            # Keep only last 1000 changes to prevent memory growth
+            if len(self.q_value_changes) > 1000:
+                self.q_value_changes.pop(0)
+            if len(self.learning_rate_effects) > 1000:
+                self.learning_rate_effects.pop(0)
+            
+            return change
+        return 0
+
+    def get_average_q_change(self):
+        """Get the average change in Q-values for the last 1000 updates"""
+        if not self.use_dqn and self.q_value_changes:
+            return sum(self.q_value_changes) / len(self.q_value_changes)
+        return 0
+
+    def get_recent_q_changes(self, n=10):
+        """Get the most recent n Q-value changes"""
+        if not self.use_dqn and self.q_value_changes:
+            return self.q_value_changes[-n:]
+        return []
+
+    def get_learning_rate_analysis(self):
+        """Analyze how learning rate affects performance"""
+        if not self.use_dqn and self.learning_rate_effects:
+            recent_effects = self.learning_rate_effects[-30:]  # Last 30 updates
+            avg_relative_change = sum(effect['relative_change'] for effect in recent_effects) / len(recent_effects)
+            avg_absolute_change = sum(effect['absolute_change'] for effect in recent_effects) / len(recent_effects)
+            
+            return {
+                'learning_rate': self.n,
+                'avg_relative_change': avg_relative_change,
+                'avg_absolute_change': avg_absolute_change,
+                'recent_effects': recent_effects
+            }
+        return None
+
+    def reset_training_state(self):
+        """Reset training state to start fresh"""
+        self.clear_inventory()
+        self.episode_rewards = []
+        self.loss_history = []
+        self.episode_counter = 0
+        self.steps_done = 0
+        self.epsilon = self.eps_start
+        self.memory.clear()

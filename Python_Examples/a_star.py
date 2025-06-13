@@ -2,12 +2,13 @@ import heapq
 import math
 import json
 import time
-from typing import List, Tuple, Set, Optional, Dict
+from typing import List, Tuple, Set, Optional, Dict, Any
 from collections import deque
 import sys
+# from Morgan_agent import Morgan
 
-# Import Morgan and related modules from your existing file
-from Morgan_agent import Morgan
+# Remove the circular import
+# from Morgan_agent import Morgan
 import hunger_learner_helper as submission
 
 class Node:
@@ -295,64 +296,70 @@ class MorganPathfinder:
         print(f"[PATHFINDER] Known crafting table at {crafting_pos}")
         
     # Replace the existing path_to_crafting_table method
-    def path_to_crafting_table(self, agent_host) -> Optional[List[Tuple[int, int]]]:
+    def path_to_crafting_table(self, agent_host: Any) -> Optional[List[Tuple[int, int]]]:
         """Find path to nearest crafting table using known positions"""
         try:
-            obj_locs = Morgan.get_obj_locations(agent_host)
-            if 'morgan' not in obj_locs:
-                print("[ERROR] Could not find Morgan's position")
-                return None
+            # Use the agent_host's getWorldState method directly
+            world_state = agent_host.getWorldState()
+            if world_state.number_of_observations_since_last_state > 0:
+                obs = json.loads(world_state.observations[-1].text)
+                if 'entities' in obs:
+                    for entity in obs['entities']:
+                        if entity['name'] == 'morgan':
+                            curr_x = entity['x']
+                            curr_z = entity['z']
+                            start_pos = (int(round(curr_x)), int(round(curr_z)))
+                            
+                            # Use known crafting table positions if available
+                            if hasattr(self, 'crafting_positions') and self.crafting_positions:
+                                crafting_table_pos = self.crafting_positions[0]
+                            else:
+                                # Fall back to discovery method
+                                crafting_table_pos = self.find_nearest_block(agent_host, start_pos, "crafting_table")
+                            
+                            if not crafting_table_pos:
+                                print("[ERROR] No crafting table found")
+                                return None
+                            
+                            return self.a_star(start_pos, crafting_table_pos)
             
-            _, curr_x, curr_z = obj_locs['morgan']
-            start_pos = (curr_x, curr_z)
-            
-            # Use known crafting table positions if available
-            if hasattr(self, 'crafting_positions') and self.crafting_positions:
-                crafting_table_pos = self.crafting_positions[0]
-                # print(f"[INFO] Using known crafting table position: {crafting_table_pos}")
-            else:
-                # Fall back to discovery method
-                crafting_table_pos = self.find_nearest_block(agent_host, start_pos, "crafting_table")
-                # print("[INFO] Using discovered crafting table position")
-            
-            if not crafting_table_pos:
-                print("[ERROR] No crafting table found")
-                return None
-            
-            # print(f"[INFO] Finding path from {start_pos} to crafting table at {crafting_table_pos}")
-            return self.a_star(start_pos, crafting_table_pos)
+            print("[ERROR] Could not find Morgan's position")
+            return None
             
         except Exception as e:
             print(f"[ERROR] Error finding path to crafting table: {e}")
             return None
 
     # Replace the existing path_to_furnace method
-    def path_to_furnace(self, agent_host) -> Optional[List[Tuple[int, int]]]:
+    def path_to_furnace(self, agent_host: Any) -> Optional[List[Tuple[int, int]]]:
         """Find path to nearest furnace using known positions"""
         try:
-            obj_locs = Morgan.get_obj_locations(agent_host)
-            if 'morgan' not in obj_locs:
-                print("[ERROR] Could not find Morgan's position")
-                return None
+            # Use the agent_host's getWorldState method directly
+            world_state = agent_host.getWorldState()
+            if world_state.number_of_observations_since_last_state > 0:
+                obs = json.loads(world_state.observations[-1].text)
+                if 'entities' in obs:
+                    for entity in obs['entities']:
+                        if entity['name'] == 'morgan':
+                            curr_x = entity['x']
+                            curr_z = entity['z']
+                            start_pos = (int(round(curr_x)), int(round(curr_z)))
+                            
+                            # Use known furnace positions if available
+                            if hasattr(self, 'furnace_positions') and self.furnace_positions:
+                                furnace_pos = self.furnace_positions[0]
+                            else:
+                                # Fall back to discovery method
+                                furnace_pos = self.find_nearest_block(agent_host, start_pos, "furnace")
+                            
+                            if not furnace_pos:
+                                print("[ERROR] No furnace found")
+                                return None
+                            
+                            return self.a_star(start_pos, furnace_pos)
             
-            _, curr_x, curr_z = obj_locs['morgan']
-            start_pos = (curr_x, curr_z)
-            
-            # Use known furnace positions if available
-            if hasattr(self, 'furnace_positions') and self.furnace_positions:
-                furnace_pos = self.furnace_positions[0]
-                # print(f"[INFO] Using known furnace position: {furnace_pos}")
-            else:
-                # Fall back to discovery method
-                furnace_pos = self.find_nearest_block(agent_host, start_pos, "furnace")
-                # print("[INFO] Using discovered furnace position")
-            
-            if not furnace_pos:
-                print("[ERROR] No furnace found")
-                return None
-            
-            # print(f"[INFO] Finding path from {start_pos} to furnace at {furnace_pos}")
-            return self.a_star(start_pos, furnace_pos)
+            print("[ERROR] Could not find Morgan's position")
+            return None
             
         except Exception as e:
             print(f"[ERROR] Error finding path to furnace: {e}")
@@ -364,120 +371,111 @@ class MorganWithPathfinding:
     Extension methods for Morgan class to add A* pathfinding capabilities
     """
     
-    def __init__(self, morgan_agent):
+    def __init__(self, morgan_agent: Any):
         self.morgan = morgan_agent
         self.pathfinder = MorganPathfinder()
     
-    def smart_move_to_crafting_table(self, agent_host):
+    def smart_move_to_crafting_table(self, agent_host: Any):
         """Use A* to move to nearest crafting table"""
-        # print("[INFO] Starting smart move to crafting table...")
-        
         # Ensure the world state is updated even if we have known positions
         self.pathfinder.update_world_state(agent_host)
         
         try:
-            obj_locs = Morgan.get_obj_locations(agent_host)
-            if 'morgan' not in obj_locs:
-                print("[ERROR] Could not find Morgan's position")
-                return None
+            world_state = agent_host.getWorldState()
+            if world_state.number_of_observations_since_last_state > 0:
+                obs = json.loads(world_state.observations[-1].text)
+                if 'entities' in obs:
+                    for entity in obs['entities']:
+                        if entity['name'] == 'morgan':
+                            curr_x = entity['x']
+                            curr_z = entity['z']
+                            start_pos = (int(round(curr_x)), int(round(curr_z)))
+                            
+                            # Use known crafting table positions if available
+                            if hasattr(self.pathfinder, 'crafting_positions') and self.pathfinder.crafting_positions:
+                                crafting_table_pos = self.pathfinder.crafting_positions[0]
+                            else:
+                                # Fall back to discovery method
+                                crafting_table_pos = self.pathfinder.find_nearest_block(agent_host, start_pos, "crafting_table")
+                            
+                            if not crafting_table_pos:
+                                print("[ERROR] No crafting table found, falling back to direct movement")
+                                # Use the morgan agent's method to get block position
+                                table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
+                                if table_x is not None:
+                                    self.morgan.move_to(agent_host, table_x, table_z)
+                                return
+                            
+                            path = self.pathfinder.a_star(start_pos, crafting_table_pos)
+                            
+                            if not path:
+                                print("[WARN] No A* path found to crafting table, falling back to direct movement")
+                                table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
+                                if table_x is not None:
+                                    self.morgan.move_to(agent_host, table_x, table_z)
+                                return
+                            
+                            self.execute_path(agent_host, path)
+                            return
             
-            _, curr_x, curr_z = obj_locs['morgan']
-            start_pos = (curr_x, curr_z)
-            
-            # Use known crafting table positions if available
-            if hasattr(self.pathfinder, 'crafting_positions') and self.pathfinder.crafting_positions:
-                crafting_table_pos = self.pathfinder.crafting_positions[0]
-                # print(f"[INFO] Using known crafting table position: {crafting_table_pos}")
-            else:
-                # Fall back to discovery method
-                crafting_table_pos = self.pathfinder.find_nearest_block(agent_host, start_pos, "crafting_table")
-                # print("[INFO] Using discovered crafting table position")
-            
-            if not crafting_table_pos:
-                print("[ERROR] No crafting table found, falling back to direct movement")
-                table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
-                if table_x is not None:
-                    # print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
-                    self.morgan.move_to(agent_host, table_x, table_z)
-                return
-            
-            # print(f"[INFO] Finding path from {start_pos} to crafting table at {crafting_table_pos}")
-            path = self.pathfinder.a_star(start_pos, crafting_table_pos)
-            
-            if not path:
-                print("[WARN] No A* path found to crafting table, falling back to direct movement")
-                table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
-                if table_x is not None:
-                    # print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
-                    self.morgan.move_to(agent_host, table_x, table_z)
-                return
-            
-            # print(f"[INFO] Found A* path with {len(path)} steps: {path}")
-            # Execute path - this actually moves Morgan
-            self.execute_path(agent_host, path)
+            print("[ERROR] Could not find Morgan's position")
             
         except Exception as e:
             print(f"[ERROR] Error in smart_move_to_crafting_table: {e}")
             # Fallback to direct movement
             table_x, table_z = self.morgan.get_block_position(agent_host, "crafting_table")
             if table_x is not None:
-                # print(f"[INFO] Moving directly to crafting table at ({table_x}, {table_z})")
                 self.morgan.move_to(agent_host, table_x, table_z)
     
-    def smart_move_to_furnace(self, agent_host):
+    def smart_move_to_furnace(self, agent_host: Any):
         """Use A* to move to nearest furnace"""
-        # print("[INFO] Starting smart move to furnace...")
-        
         # Ensure the world state is updated even if we have known positions
         self.pathfinder.update_world_state(agent_host)
         
         try:
-            obj_locs = Morgan.get_obj_locations(agent_host)
-            if 'morgan' not in obj_locs:
-                print("[ERROR] Could not find Morgan's position")
-                return None
+            world_state = agent_host.getWorldState()
+            if world_state.number_of_observations_since_last_state > 0:
+                obs = json.loads(world_state.observations[-1].text)
+                if 'entities' in obs:
+                    for entity in obs['entities']:
+                        if entity['name'] == 'morgan':
+                            curr_x = entity['x']
+                            curr_z = entity['z']
+                            start_pos = (int(round(curr_x)), int(round(curr_z)))
+                            
+                            # Use known furnace positions if available
+                            if hasattr(self.pathfinder, 'furnace_positions') and self.pathfinder.furnace_positions:
+                                furnace_pos = self.pathfinder.furnace_positions[0]
+                            else:
+                                # Fall back to discovery method
+                                furnace_pos = self.pathfinder.find_nearest_block(agent_host, start_pos, "furnace")
+                            
+                            if not furnace_pos:
+                                print("[ERROR] No furnace found, falling back to direct movement")
+                                furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
+                                if furnace_x is not None:
+                                    self.morgan.move_to(agent_host, furnace_x, furnace_z)
+                                return
+                            
+                            path = self.pathfinder.a_star(start_pos, furnace_pos)
+                            
+                            if not path:
+                                print("[WARN] No A* path found to furnace, falling back to direct movement")
+                                furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
+                                if furnace_x is not None:
+                                    self.morgan.move_to(agent_host, furnace_x, furnace_z)
+                                return
+                            
+                            self.execute_path(agent_host, path)
+                            return
             
-            _, curr_x, curr_z = obj_locs['morgan']
-            start_pos = (curr_x, curr_z)
-            
-            # Use known furnace positions if available
-            if hasattr(self.pathfinder, 'furnace_positions') and self.pathfinder.furnace_positions:
-                furnace_pos = self.pathfinder.furnace_positions[0]
-                # print(f"[INFO] Using known furnace position: {furnace_pos}")
-            else:
-                # Fall back to discovery method
-                furnace_pos = self.pathfinder.find_nearest_block(agent_host, start_pos, "furnace")
-                # print("[INFO] Using discovered furnace position")
-            
-            if not furnace_pos:
-                print("[ERROR] No furnace found, falling back to direct movement")
-                furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
-                if furnace_x is not None:
-                    # print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
-                    self.morgan.move_to(agent_host, furnace_x, furnace_z)
-                return
-            
-            # print(f"[INFO] Finding path from {start_pos} to furnace at {furnace_pos}")
-            path = self.pathfinder.a_star(start_pos, furnace_pos)
-            
-            if not path:
-                print("[WARN] No A* path found to furnace, falling back to direct movement")
-                furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
-                if furnace_x is not None:
-                    # print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
-                    self.morgan.move_to(agent_host, furnace_x, furnace_z)
-                return
-            
-            # print(f"[INFO] Found A* path with {len(path)} steps: {path}")
-            # Execute path - this actually moves Morgan
-            self.execute_path(agent_host, path)
+            print("[ERROR] Could not find Morgan's position")
             
         except Exception as e:
             print(f"[ERROR] Error in smart_move_to_furnace: {e}")
             # Fallback to direct movement
             furnace_x, furnace_z = self.morgan.get_block_position(agent_host, "furnace")
             if furnace_x is not None:
-                # print(f"[INFO] Moving directly to furnace at ({furnace_x}, {furnace_z})")
                 self.morgan.move_to(agent_host, furnace_x, furnace_z)
     
     def execute_path(self, agent_host, path: List[Tuple[int, int]]):
