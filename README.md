@@ -1,82 +1,99 @@
-# 175-final-project
+Morgan: Reinforcement Learning Agent for Minecraft
 
-Cooked Food:
-- Bread (minecraft:bread)
-- Baked Potato (minecraft:baked_potato)
-- Cooked Beef / Steak (minecraft:cooked_beef)
-- Cooked Chicken (minecraft:cooked_chicken)
-- Cooked Fish (minecraft:cooked_fish)
-- Cooked Salmon (minecraft:cooked_fish, DataValue 1)
-- Cooked Mutton (minecraft:cooked_mutton)
-- Cooked Porkchop (minecraft:cooked_porkchop)
-- Cooked Rabbit (minecraft:cooked_rabbit)
-- Rabbit Stew (minecraft:rabbit_stew)
-- Beetroot Soup (minecraft:beetroot_soup)
-- Mushroom Stew (minecraft:mushroom_stew)
-- Pumpkin Pie (minecraft:pumpkin_pie)
+Morgan is a reinforcement learning agent built in Microsoft Malmo that learns to gather ingredients, craft items, cook food, and present the best possible gift.
+The project began with a tabular Q-learning baseline and expanded into a Deep Q-Learning (DQN) prototype using PyTorch.
 
-Raw Ingredients / Raw Food:
-- Apple (minecraft:apple)
-- Raw Beef (minecraft:beef)
-- Raw Chicken (minecraft:chicken)
-- Raw Fish (minecraft:fish)
-- Raw Salmon (minecraft:fish, DataValue 1)
-- Clownfish (Tropical Fish) (minecraft:fish, DataValue 2)
-- Pufferfish (minecraft:fish, DataValue 3)
-- Raw Mutton (minecraft:mutton)
-- Raw Porkchop (minecraft:porkchop)
-- Raw Rabbit (minecraft:rabbit)
-- Potato (minecraft:potato)
-- Poisonous Potato (minecraft:poisonous_potato)
-- Beetroot (minecraft:beetroot)
-- Carrot (minecraft:carrot)
-- Melon Slice (minecraft:melon)
-- Pumpkin (minecraft:pumpkin)
-- Egg (minecraft:egg)
-- Sugar (minecraft:sugar)
-- Milk Bucket (minecraft:milk_bucket)
-- Wheat (minecraft:wheat)
-- Cookie (minecraft:cookie)
-- Glistering Melon Slice (minecraft:speckled_melon)
-- Spider Eye (minecraft:spider_eye)
+Overview
 
-TODO:
-- agent freezes (not sure what to do about that)
-- agent can only walk instead of run
-- increase scope of food (last)
-    - update food recipes and cook recipes
-a. use furnace to cook and crafting table to craft 
-    - navigate to furnace & crafting table dynamically
-- make it walk from one ingredient to another rather than teleport back to the middle
-    - try to avoid extra ingredients or drop them
-    - pathfind
-- maybe craft the crafting table and furnace?
-- instead of using predetermined rewards map, use the hunger gained as reward.
-    - max reward/goal reward is incorrect. we need it to only be able to consume one food at a time.
-    - only be able to consume when hunger is not max
-        - even when hunger is not max, sometimes hunger gained isnt always what u get, it might be capped at 10.
-            - for example: current hunger is 8, eating a steak will result in 10 hunger, giving a reward of 2. But reward should actually be 8
+The goal of this project is to train an AI agent to:
 
-install torch and torchvision
+Collect items (e.g., pumpkin, egg, sugar)
+
+Craft recipes like pumpkin pie and mushroom stew
+
+Cook raw ingredients into cooked food
+
+Present the final crafted or cooked item to maximize reward
+
+Morgan learns by interacting with the Minecraft world and updating its policy through Q-learning and DQN techniques.
+
+Project Structure
+175-final-project/
+│
+├── Python_Examples/
+│   ├── final_project_runner.py      # Main runner – starts missions and training loop
+│   ├── Morgan_agent.py              # Core agent (Q-learning and DQN logic)
+│   ├── hunger_learner_helper.py     # Recipes, reward maps, helper functions
+│   ├── a_star.py                    # Pathfinding (A* search) and walkability
+│   ├── dqn_architecture.py          # PyTorch model, replay buffer, training routines
+│
+└── README.md
+
+Setup
+
+Create environment
+
+conda create -n myenv python=3.7
+conda activate myenv
 
 
-CHAI TO DO A*:
-Missing Maze Awareness 
-The A* algorithm needs to know about the maze obstacles to plan around them. Your current setup generates random obstacles, but there's no clear indication that the A* algorithm receives this obstacle information.
+Install dependencies
 
-Stuck Prevention Not Implemented 
-A* pathfinding can get stuck when agents try to follow paths without considering dynamic obstacles or when they encounter situations where the calculated path becomes invalid
-
-the agent itself is not taking in the obstacle properly
-the a* stuck prevention is weird as fuck
-make sure the maze is proper, like a path no random blocks\
-the agent still assumes that it reach the furnace by force move (FLAWED STUCK LOGIC)
-
-test case:
-box the agent with a wall
-make sure the agent reach the furnace to cook and dont skip it
+pip install torch==1.10.2 numpy==1.21.6 matplotlib==3.5.3 gym==0.21.0
 
 
+Install Microsoft Malmo
 
-worst case:
-fuck the maze just put a the crafting table and furnace randomly already works
+Download Malmo 0.37.0 for Python 3.7.
+
+Copy MalmoPython.pyd into your environment’s Lib/site-packages.
+
+Add Malmo’s /bin directory to your PATH.
+
+Run the agent
+
+python Python_Examples/final_project_runner.py
+
+Key Features
+
+Tabular Q-Learning baseline
+Discrete state-action mapping using sorted inventory tuples.
+
+Deep Q-Learning (DQN) prototype
+Neural Q-network approximates Q(s, a) for generalization to unseen states.
+
+Crafting and Cooking System
+Automatically detects valid recipes and checks proximity to crafting tables or furnaces.
+
+Pathfinding
+A* search (a_star.py) enables efficient movement to targets.
+
+Logging
+Tracks per-episode rewards, ε values, and loss for performance evaluation.
+
+Evaluating Progress
+
+After training, you can visualize performance:
+
+import numpy as np, matplotlib.pyplot as plt
+rews = np.load("episode_rewards.npy")
+plt.plot(rews)
+plt.xlabel("Episode")
+plt.ylabel("Total Reward")
+plt.title("Morgan Agent Learning Curve")
+plt.show()
+
+
+This shows how rewards improve over time as the agent learns better strategies.
+
+Future Improvements
+
+Integrate Double / Dueling DQN architectures
+
+Implement Prioritized Experience Replay
+
+Extend to Recurrent DQN (LSTM) for partial observability
+
+Add action masking for invalid moves
+
+Improve data visualization with TensorBoard or W&B
