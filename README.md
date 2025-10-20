@@ -17,18 +17,6 @@ Present the final crafted or cooked item to maximize reward
 
 Morgan learns by interacting with the Minecraft world and updating its policy through Q-learning and DQN techniques.
 
-Project Structure
-175-final-project/
-│
-├── Python_Examples/
-│   ├── final_project_runner.py      # Main runner – starts missions and training loop
-│   ├── Morgan_agent.py              # Core agent (Q-learning and DQN logic)
-│   ├── hunger_learner_helper.py     # Recipes, reward maps, helper functions
-│   ├── a_star.py                    # Pathfinding (A* search) and walkability
-│   ├── dqn_architecture.py          # PyTorch model, replay buffer, training routines
-│
-└── README.md
-
 Setup
 
 Create environment
